@@ -1,0 +1,814 @@
+{
+  "hkrpg": {
+    "de-de": [
+      {
+        "key": "11",
+        "name": "Figuren-Aktionswarp"
+      },
+      {
+        "key": "12",
+        "name": "Lichtkegel-Aktionswarp"
+      },
+      {
+        "key": "1",
+        "name": "Standardwarp"
+      },
+      {
+        "key": "2",
+        "name": "Einsteigerwarp"
+      },
+      {
+        "key": "21",
+        "name": "Figuren-Kollaborationswarp"
+      },
+      {
+        "key": "22",
+        "name": "Lichtkegel-Kollaborationswarp"
+      }
+    ],
+    "ru-ru": [
+      {
+        "key": "11",
+        "name": "Прыжок события: Персонаж"
+      },
+      {
+        "key": "12",
+        "name": "Прыжок события: Световой конус"
+      },
+      {
+        "key": "1",
+        "name": "Стандартный прыжок"
+      },
+      {
+        "key": "2",
+        "name": "Прыжок новичка"
+      },
+      {
+        "key": "21",
+        "name": "Совместный Прыжок события: Персонаж"
+      },
+      {
+        "key": "22",
+        "name": "Совместный Прыжок события: Световой конус"
+      }
+    ],
+    "th-th": [
+      {
+        "key": "11",
+        "name": "กิจกรรมวาร์ปตัวละคร"
+      },
+      {
+        "key": "12",
+        "name": "กิจกรรมวาร์ป Light Cone"
+      },
+      {
+        "key": "1",
+        "name": "วาร์ปถาวร"
+      },
+      {
+        "key": "2",
+        "name": "วาร์ปสำหรับมือใหม่"
+      },
+      {
+        "key": "21",
+        "name": "กิจกรรมวาร์ปตัวละครคอลแลบ"
+      },
+      {
+        "key": "22",
+        "name": "กิจกรรมวาร์ป Light Cone คอลแลบ"
+      }
+    ],
+    "zh-cn": [
+      {
+        "key": "11",
+        "name": "角色活动跃迁"
+      },
+      {
+        "key": "12",
+        "name": "光锥活动跃迁"
+      },
+      {
+        "key": "1",
+        "name": "常驻跃迁"
+      },
+      {
+        "key": "2",
+        "name": "新手跃迁"
+      },
+      {
+        "key": "21",
+        "name": "角色联动跃迁"
+      },
+      {
+        "key": "22",
+        "name": "光锥联动跃迁"
+      }
+    ],
+    "zh-tw": [
+      {
+        "key": "11",
+        "name": "角色活動躍遷"
+      },
+      {
+        "key": "12",
+        "name": "光錐活動躍遷"
+      },
+      {
+        "key": "1",
+        "name": "常駐躍遷"
+      },
+      {
+        "key": "2",
+        "name": "新手躍遷"
+      },
+      {
+        "key": "21",
+        "name": "角色聯動躍遷"
+      },
+      {
+        "key": "22",
+        "name": "光錐聯動躍遷"
+      }
+    ],
+    "en-us": [
+      {
+        "key": "11",
+        "name": "Character Event Warp"
+      },
+      {
+        "key": "12",
+        "name": "Light Cone Event Warp"
+      },
+      {
+        "key": "1",
+        "name": "Regular Warp"
+      },
+      {
+        "key": "2",
+        "name": "Starter Warp"
+      },
+      {
+        "key": "21",
+        "name": "Character Collaboration Warp"
+      },
+      {
+        "key": "22",
+        "name": "Light Cone Collaboration Warp"
+      }
+    ],
+    "es-es": [
+      {
+        "key": "11",
+        "name": "Salto de evento de personaje"
+      },
+      {
+        "key": "12",
+        "name": "Salto de evento de cono de luz"
+      },
+      {
+        "key": "1",
+        "name": "Salto normal"
+      },
+      {
+        "key": "2",
+        "name": "Salto de principiante"
+      },
+      {
+        "key": "21",
+        "name": "Salto de personaje de colaboración"
+      },
+      {
+        "key": "22",
+        "name": "Salto de cono de luz de colaboración"
+      }
+    ],
+    "fr-fr": [
+      {
+        "key": "11",
+        "name": "Saut hyperespace événement de personnage"
+      },
+      {
+        "key": "12",
+        "name": "Saut hyperespace événement de cônes de lumière"
+      },
+      {
+        "key": "1",
+        "name": "Saut hyperespace classique"
+      },
+      {
+        "key": "2",
+        "name": "Saut hyperespace de départ"
+      },
+      {
+        "key": "21",
+        "name": "Saut de collaboration de personnage"
+      },
+      {
+        "key": "22",
+        "name": "Saut événement de collaboration de cône de lumière"
+      }
+    ],
+    "id-id": [
+      {
+        "key": "11",
+        "name": "Event Warp Karakter"
+      },
+      {
+        "key": "12",
+        "name": "Event Warp Light Cone"
+      },
+      {
+        "key": "1",
+        "name": "Warp Reguler"
+      },
+      {
+        "key": "2",
+        "name": "Warp Pemula"
+      },
+      {
+        "key": "21",
+        "name": "Warp Kolaborasi Karakter"
+      },
+      {
+        "key": "22",
+        "name": "Warp Kolaborasi Light Cone"
+      }
+    ],
+    "ja-jp": [
+      {
+        "key": "11",
+        "name": "イベント跳躍・キャラクター"
+      },
+      {
+        "key": "12",
+        "name": "イベント跳躍・光円錐"
+      },
+      {
+        "key": "1",
+        "name": "恒常跳躍"
+      },
+      {
+        "key": "2",
+        "name": "初心者跳躍"
+      },
+      {
+        "key": "21",
+        "name": "コラボ跳躍・キャラクター"
+      },
+      {
+        "key": "22",
+        "name": "コラボ跳躍・光円錐"
+      }
+    ],
+    "ko-kr": [
+      {
+        "key": "11",
+        "name": "캐릭터 이벤트 워프"
+      },
+      {
+        "key": "12",
+        "name": "광추 이벤트 워프"
+      },
+      {
+        "key": "1",
+        "name": "상시 워프"
+      },
+      {
+        "key": "2",
+        "name": "초보자 워프"
+      },
+      {
+        "key": "21",
+        "name": "캐릭터 콜라보 워프"
+      },
+      {
+        "key": "22",
+        "name": "광추 콜라보 워프"
+      }
+    ],
+    "pt-pt": [
+      {
+        "key": "11",
+        "name": "Salto Hiperespacial de Evento de Personagem"
+      },
+      {
+        "key": "12",
+        "name": "Salto Hiperespacial de Evento de Cone de Luz"
+      },
+      {
+        "key": "1",
+        "name": "Salto Hiperespacial Permanente"
+      },
+      {
+        "key": "2",
+        "name": "Salto Hiperespacial Inicial"
+      },
+      {
+        "key": "21",
+        "name": "Salto Hiperespacial de Colaboração de Personagem"
+      },
+      {
+        "key": "22",
+        "name": "Salto Hiperespacial de Colaboração de Cone de Luz"
+      }
+    ],
+    "vi-vn": [
+      {
+        "key": "11",
+        "name": "Bước Nhảy Sự Kiện Nhân Vật"
+      },
+      {
+        "key": "12",
+        "name": "Bước Nhảy Sự Kiện Nón Ánh Sáng"
+      },
+      {
+        "key": "1",
+        "name": "Bước Nhảy Vĩnh Viễn"
+      },
+      {
+        "key": "2",
+        "name": "Bước Nhảy Tân Thủ"
+      },
+      {
+        "key": "21",
+        "name": "Bước Nhảy Nhân Vật Hợp Tác"
+      },
+      {
+        "key": "22",
+        "name": "Bước Nhảy Nón Ánh Sáng Hợp Tác"
+      }
+    ]
+  },
+  "genshin": {
+    "en-us": [
+      {
+        "key": "200",
+        "name": "Permanent Wish"
+      },
+      {
+        "key": "100",
+        "name": "Novice Wishes"
+      },
+      {
+        "key": "301",
+        "name": "Character Event Wish"
+      },
+      {
+        "key": "302",
+        "name": "Weapon Event Wish"
+      },
+      {
+        "key": "400",
+        "name": "Character Event Wish-2"
+      },
+      {
+        "key": "500",
+        "name": "Chronicled Wish"
+      }
+    ],
+    "fr-fr": [
+      {
+        "key": "200",
+        "name": "Vœux permanents"
+      },
+      {
+        "key": "100",
+        "name": "Vœux des débutants"
+      },
+      {
+        "key": "301",
+        "name": "Vœux événements de personnage"
+      },
+      {
+        "key": "302",
+        "name": "Vœux événements d'arme"
+      },
+      {
+        "key": "400",
+        "name": "Vœux événements de personnage - 2"
+      },
+      {
+        "key": "500",
+        "name": "Vœux nostalgie"
+      }
+    ],
+    "de-de": [
+      {
+        "key": "200",
+        "name": "Standardgebet"
+      },
+      {
+        "key": "100",
+        "name": "Neulingsgebete"
+      },
+      {
+        "key": "301",
+        "name": "Figurenaktionsgebet"
+      },
+      {
+        "key": "302",
+        "name": "Waffenaktionsgebet"
+      },
+      {
+        "key": "400",
+        "name": "Figurenaktionsgebet 2"
+      },
+      {
+        "key": "500",
+        "name": "Kollektionsgebet"
+      }
+    ],
+    "es-es": [
+      {
+        "key": "200",
+        "name": "Gachapón permanente"
+      },
+      {
+        "key": "100",
+        "name": "Gachapón de principiante"
+      },
+      {
+        "key": "301",
+        "name": "Gachapón promocional de personaje"
+      },
+      {
+        "key": "302",
+        "name": "Gachapón promocional de arma"
+      },
+      {
+        "key": "400",
+        "name": "Gachapón promocional de personaje 2"
+      },
+      {
+        "key": "500",
+        "name": "Gachapón recopilatorio"
+      }
+    ],
+    "pt-pt": [
+      {
+        "key": "200",
+        "name": "Oração Comum"
+      },
+      {
+        "key": "100",
+        "name": "Desejos de Novato"
+      },
+      {
+        "key": "301",
+        "name": "Oração do Evento do Personagem"
+      },
+      {
+        "key": "302",
+        "name": "Oração do Evento de Arma"
+      },
+      {
+        "key": "400",
+        "name": "Oração de Evento de Personagem - 2"
+      },
+      {
+        "key": "500",
+        "name": "Registro de Oração"
+      }
+    ],
+    "ru-ru": [
+      {
+        "key": "200",
+        "name": "Стандартная молитва"
+      },
+      {
+        "key": "100",
+        "name": "Молитва новичка"
+      },
+      {
+        "key": "301",
+        "name": "Молитва события персонажа"
+      },
+      {
+        "key": "302",
+        "name": "Молитва события оружия"
+      },
+      {
+        "key": "400",
+        "name": "Молитва события персонажа II"
+      },
+      {
+        "key": "500",
+        "name": "Молитва хроник"
+      }
+    ],
+    "ja-jp": [
+      {
+        "key": "200",
+        "name": "通常祈願"
+      },
+      {
+        "key": "100",
+        "name": "初心者向け祈願"
+      },
+      {
+        "key": "301",
+        "name": "イベント祈願・キャラクター"
+      },
+      {
+        "key": "302",
+        "name": "イベント祈願・武器"
+      },
+      {
+        "key": "400",
+        "name": "イベント祈願・キャラクター 2"
+      },
+      {
+        "key": "500",
+        "name": "集録祈願"
+      }
+    ],
+    "ko-kr": [
+      {
+        "key": "200",
+        "name": "상주 기원"
+      },
+      {
+        "key": "100",
+        "name": "초심자 기원"
+      },
+      {
+        "key": "301",
+        "name": "캐릭터 이벤트 기원"
+      },
+      {
+        "key": "302",
+        "name": "무기 이벤트 기원"
+      },
+      {
+        "key": "400",
+        "name": "캐릭터 이벤트 기원-2"
+      },
+      {
+        "key": "500",
+        "name": "묶음 기원"
+      }
+    ],
+    "th-th": [
+      {
+        "key": "200",
+        "name": "อธิษฐานถาวร"
+      },
+      {
+        "key": "100",
+        "name": "ผู้เริ่มอธิษฐาน"
+      },
+      {
+        "key": "301",
+        "name": "กิจกรรมอธิษฐานตัวละคร"
+      },
+      {
+        "key": "302",
+        "name": "กิจกรรมอธิษฐานอาวุธ"
+      },
+      {
+        "key": "400",
+        "name": "กิจกรรมอธิษฐานตัวละคร - 2"
+      },
+      {
+        "key": "500",
+        "name": "การอธิษฐานรวมปรารถนา"
+      }
+    ],
+    "vi-vn": [
+      {
+        "key": "200",
+        "name": "Cầu Nguyện Thường"
+      },
+      {
+        "key": "100",
+        "name": "Cầu Nguyện Tân Thủ"
+      },
+      {
+        "key": "301",
+        "name": "Cầu Nguyện Nhân Vật"
+      },
+      {
+        "key": "302",
+        "name": "Cầu Nguyện Vũ Khí"
+      },
+      {
+        "key": "400",
+        "name": "Cầu Nguyện Nhân Vật-2"
+      },
+      {
+        "key": "500",
+        "name": "Sử Ký Cầu Nguyện"
+      }
+    ],
+    "id-id": [
+      {
+        "key": "200",
+        "name": "Permohonan Standar"
+      },
+      {
+        "key": "100",
+        "name": "Permohonan Pemula"
+      },
+      {
+        "key": "301",
+        "name": "Event Permohonan Karakter"
+      },
+      {
+        "key": "302",
+        "name": "Event Permohonan Senjata"
+      },
+      {
+        "key": "400",
+        "name": "Event Permohonan Karakter - 2"
+      },
+      {
+        "key": "500",
+        "name": "Chronicled Wish"
+      }
+    ],
+    "zh-cn": [
+      {
+        "key": "200",
+        "name": "常驻祈愿"
+      },
+      {
+        "key": "100",
+        "name": "新手祈愿"
+      },
+      {
+        "key": "301",
+        "name": "角色活动祈愿"
+      },
+      {
+        "key": "302",
+        "name": "武器活动祈愿"
+      },
+      {
+        "key": "400",
+        "name": "角色活动祈愿-2"
+      },
+      {
+        "key": "500",
+        "name": "集录祈愿"
+      }
+    ],
+    "zh-tw": [
+      {
+        "key": "200",
+        "name": "常駐祈願"
+      },
+      {
+        "key": "100",
+        "name": "新手祈願"
+      },
+      {
+        "key": "301",
+        "name": "角色活動祈願"
+      },
+      {
+        "key": "302",
+        "name": "武器活動祈願"
+      },
+      {
+        "key": "400",
+        "name": "角色活動祈願-2"
+      },
+      {
+        "key": "500",
+        "name": "集錄祈願"
+      }
+    ],
+    "tr-tr": [
+      {
+        "key": "200",
+        "name": "Kalıcı Dilek"
+      },
+      {
+        "key": "100",
+        "name": "Acemi Dilekleri"
+      },
+      {
+        "key": "301",
+        "name": "Karakter Etkinliği Dileği"
+      },
+      {
+        "key": "302",
+        "name": "Silah Etkinliği Dileği"
+      },
+      {
+        "key": "400",
+        "name": "Karakter Etkinliği Dileği-2"
+      },
+      {
+        "key": "500",
+        "name": "Nostaljik Dilek"
+      }
+    ],
+    "it-it": [
+      {
+        "key": "200",
+        "name": "Desiderio standard"
+      },
+      {
+        "key": "100",
+        "name": "Desideri per viaggiatori novizi"
+      },
+      {
+        "key": "301",
+        "name": "Desiderio evento personaggio"
+      },
+      {
+        "key": "302",
+        "name": "Desiderio evento arma"
+      },
+      {
+        "key": "400",
+        "name": "Desiderio evento personaggio 2"
+      },
+      {
+        "key": "500",
+        "name": "Desiderio delle cronache"
+      }
+    ]
+  },
+  "nap": {
+    "zh-cn": [
+      {
+        "key": "2",
+        "name": "独家频段"
+      },
+      {
+        "key": "3",
+        "name": "音擎频段"
+      },
+      {
+        "key": "102",
+        "name": "独家重映"
+      },
+      {
+        "key": "103",
+        "name": "音擎回响"
+      },
+      {
+        "key": "1",
+        "name": "常驻频段"
+      },
+      {
+        "key": "5",
+        "name": "邦布频段"
+      }
+    ],
+    "zh-tw": [
+      {
+        "key": "2",
+        "name": "獨家頻段"
+      },
+      {
+        "key": "3",
+        "name": "音擎頻段"
+      },
+      {
+        "key": "102",
+        "name": "獨家重映"
+      },
+      {
+        "key": "103",
+        "name": "音擎回響"
+      },
+      {
+        "key": "1",
+        "name": "常駐頻段"
+      },
+      {
+        "key": "5",
+        "name": "邦布頻段"
+      }
+    ],
+    "en-us": [
+      {
+        "key": "2",
+        "name": "Exclusive Channel"
+      },
+      {
+        "key": "3",
+        "name": "W-Engine Channel"
+      },
+      {
+        "key": "102",
+        "name": "Exclusive Rescreening"
+      },
+      {
+        "key": "103",
+        "name": "W-Engine Reverberation"
+      },
+      {
+        "key": "1",
+        "name": "Stable Channel"
+      },
+      {
+        "key": "5",
+        "name": "Bangboo Channel"
+      }
+    ]
+  }
+}

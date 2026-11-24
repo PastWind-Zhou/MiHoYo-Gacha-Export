@@ -1,0 +1,7 @@
+node_modules/
+dist/
+build/
+userData/
+*.log
+.DS_Store
+dependencies/
