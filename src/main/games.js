@@ -35,6 +35,13 @@ const games = {
     uigfTimeZone: 'region',
     hideKey: 'hideNovice',
     hidePool: '2',
+    // 抽卡记录池 → 卡池排期 channel
+    //   11/21 角色活动/联动 → character
+    //   12/22 光锥活动/联动 → lightcone
+    //   1 常驻跃迁 / 2 新手跃迁 → 无排期数据（常驻池本就没有 UP 概念）
+    poolChannel: { '11': 'character', '21': 'character', '12': 'lightcone', '22': 'lightcone' },
+    // 不参与歪率统计的池：常驻/新手池本就没有 UP 概念
+    noDeviationPools: ['1', '2'],
     ranks: { low: '3', mid: '4', top: '5' },
     bangboo: false,
     idMode: 'item',
@@ -64,6 +71,16 @@ const games = {
     uigfTimeZone: 'uid',
     hideKey: 'hideNovice',
     hidePool: '100',
+    // 抽卡记录池 → 卡池排期 channel
+    //   301/400 角色活动 → character
+    //   302 武器活动 → weapon
+    //   500 集录祈愿 → jilu（角色+武器混合池，UP 按记录 item_type 分别取）
+    //   200 常驻祈愿 / 100 新手祈愿 → 无排期数据（常驻池本就没有 UP 概念）
+    poolChannel: { '301': 'character', '400': 'character', '302': 'weapon', '500': 'jilu' },
+    // 不参与歪率统计的池：
+    //   500 集录祈愿 —— 定轨目标由玩家自选，官方 API 与抽卡记录都不返回，无法判定 UP/歪
+    //   200 常驻祈愿 / 100 新手祈愿 —— 本就没有 UP 概念
+    noDeviationPools: ['500', '200', '100'],
     ranks: { low: '3', mid: '4', top: '5' },
     bangboo: false,
     idMode: 'name',
@@ -101,6 +118,13 @@ const games = {
     uigfTimeZone: 'region',
     hideKey: 'hideStandard',
     hidePool: '1',
+    // 抽卡记录池 → 卡池排期 channel
+    //   2 独家频段 / 5 独家重映 / 102 音擎回响 → character
+    //   3 音擎频段 / 103 音擎回响 → engine
+    //   1 常驻频段 / 邦布频段 → 无排期数据（常驻池本就没有 UP 概念）
+    poolChannel: { '2': 'character', '3': 'engine', '5': 'character', '102': 'character', '103': 'engine' },
+    // 不参与歪率统计的池：常驻/回响/邦布池无 UP 概念
+    noDeviationPools: ['1', '102', '103'],
     ranks: { low: '2', mid: '3', top: '4' },
     bangboo: true,
     idMode: 'item',

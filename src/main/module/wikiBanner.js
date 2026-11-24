@@ -11,6 +11,17 @@ const SOURCES = {
   nap: 'https://wiki.biligame.com/zzz/%E8%B0%83%E9%A2%91'
 }
 
+// 额外页面：原神「集录祈愿」(gacha_type=500) 是独立的角色+武器混合池，
+// 不在「往期祈愿」页里，需单独抓取
+const EXTRA_SOURCES = {
+  genshin: [
+    {
+      url: 'https://wiki.biligame.com/ys/%E9%9B%86%E5%BD%95%E7%A5%88%E6%84%BF',
+      channel: 'jilu'
+    }
+  ]
+}
+
 const decodeEntities = (s) => String(s)
   .replace(/&nbsp;/g, ' ').replace(/&#160;/g, ' ').replace(/&amp;/g, '&')
   .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
@@ -132,6 +143,93 @@ const parsePage = (html) => {
   return results
 }
 
+// ---------- 原神「集录祈愿」页 ----------
+// 结构与「往期祈愿」页不同：每个卡池由一对表格组成
+//   表A（信息）：卡池名称 / 时间 / 版本 / 备注
+//   表B（明细）：时间 / 版本 / 5星角色 / 4星角色 / 5星武器 / 4星武器
+// 5星角色与5星武器分列在两行 —— 这是混合池，两者都是 UP 名单，
+// 判定时需按抽卡记录的 item_type 分别取用。
+const parseJiluPage = (html) => {
+  const clean = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '')
+  const tableRe = /<table[^>]*class="wikitable[^"]*"[^>]*>([\s\S]*?)<\/table>/g
+  const tables = []
+  let tm
+  while ((tm = tableRe.exec(clean)) !== null) {
+    const rows = []
+    const trRe = /<tr[^>]*>([\s\S]*?)<\/tr>/g
+    let r
+    while ((r = trRe.exec(tm[1])) !== null) {
+      const cells = []
+      const tdRe = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g
+      let td
+      while ((td = tdRe.exec(r[1])) !== null) cells.push(td[1])
+      rows.push(cells)
+    }
+    tables.push(rows)
+  }
+
+  const namesOf = (cellHtml) => {
+    const out = []
+    const re = /<a([^>]*)>([\s\S]*?)<\/a>/g
+    let m
+    while ((m = re.exec(cellHtml)) !== null) {
+      const t = m[1].match(/title="([^"]*)"/)
+      const name = t ? decodeEntities(t[1]) : textOf(m[2])
+      const clean2 = cleanName(name)
+      if (clean2) out.push(clean2)
+    }
+    if (out.length) return out
+    return textOf(cellHtml).replace(/[〔〕\[\]]/g, ' ').split(/\s+/).filter(Boolean).map(cleanName)
+  }
+
+  const results = []
+  for (let i = 0; i < tables.length; i += 2) {
+    const infoRows = tables[i] || []
+    const detailRows = tables[i + 1] || []
+    if (!detailRows.length) continue
+
+    let title = ''
+    let timeText = ''
+    let version = ''
+    for (const row of infoRows) {
+      const label = textOf(row[0] || '')
+      if (label === '卡池名称') title = textOf(row[1] || '')
+      if (label === '时间') timeText = textOf(row[1] || '')
+      if (label === '版本') version = textOf(row[1] || '')
+    }
+    if (!title || !timeText) continue
+
+    let upChar = []
+    let upWeapon = []
+    let up4Char = []
+    let up4Weapon = []
+    for (const row of detailRows) {
+      const label = textOf(row[0] || '')
+      if (label === '5星角色') upChar = row.slice(1).flatMap(namesOf)
+      else if (label === '5星武器') upWeapon = row.slice(1).flatMap(namesOf)
+      else if (label === '4星角色') up4Char = row.slice(1).flatMap(namesOf)
+      else if (label === '4星武器') up4Weapon = row.slice(1).flatMap(namesOf)
+    }
+    if (!upChar.length && !upWeapon.length) continue
+
+    const t = parseTimeParts(timeText)
+    if (!t.end) continue
+    const vm = String(version).match(/^(.+?)(上半|下半)?$/)
+    results.push({
+      version: vm ? vm[1] : version,
+      phase: vm && vm[2] ? vm[2] : '',
+      channel: 'jilu',
+      title,
+      start: t.start,
+      end: t.end,
+      up: [...upChar, ...upWeapon],
+      up4: [...up4Char, ...up4Weapon],
+      upByType: { character: upChar, weapon: upWeapon }
+    })
+  }
+  return results
+}
+
 // 缺失的开始时间由同 channel 上一期的结束时间推定
 const inferStarts = (list) => {
   const byCh = {}
@@ -167,6 +265,32 @@ const fetchBanners = async (game) => {
   if (!res.ok) throw new Error('wiki HTTP ' + res.status)
   const html = await res.text()
   const list = inferStarts(parsePage(html))
+
+  // 额外页面（原神集录祈愿）
+  // 注意：集录祈愿的期次并不连续（中间隔着常规角色池），
+  // 因此不能用「上一期结束时间」推定缺失的开始时间 ——
+  // 那样会得到远早于实际的值。缺失的 start 留空，
+  // 由 gachaBanner.fillJiluStarts 用内置角色池的同期时间补齐。
+  const extras = EXTRA_SOURCES[game] || []
+  for (const ex of extras) {
+    try {
+      const r2 = await fetch(ex.url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+          'Accept-Language': 'zh-CN,zh;q=0.9'
+        }
+      })
+      if (!r2.ok) continue
+      const extra = parseJiluPage(await r2.text())
+      for (const x of extra) {
+        x.channel = ex.channel
+        list.push(x)
+      }
+    } catch (e) {
+      // 额外页面失败不影响主数据
+    }
+  }
+
   return {
     source: url,
     timezone: 'UTC+8',
@@ -174,15 +298,16 @@ const fetchBanners = async (game) => {
     note: '从 Biligame wiki 抓取',
     banners: list.map((x) => ({
       version: x.version,
-      phase: '',
+      phase: x.phase,
       channel: x.channel,
       title: x.title,
       start: x.start,
       end: x.end,
-      up: x.up5,
-      up4: x.up4
+      up: x.up,
+      up4: x.up4,
+      ...(x.upByType ? { upByType: x.upByType } : {})
     }))
   }
 }
 
-module.exports = { fetchBanners, parsePage, inferStarts, SOURCES }
+module.exports = { fetchBanners, parsePage, parseJiluPage, inferStarts, SOURCES, EXTRA_SOURCES }

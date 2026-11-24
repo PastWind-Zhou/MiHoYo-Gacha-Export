@@ -27,6 +27,10 @@ const builtinBanners = {
   nap: require('../gachaBanner/nap.json')
 }
 
+// 原神「集录祈愿」(gacha_type=500) 是独立的角色+武器混合池，
+// 不在 hoyo-gacha 主源数据中，单独内置一份（来自 Biligame wiki 集录祈愿页）
+const genshinJilu = require('../gachaBanner/genshin-jilu.json')
+
 const MAX_REMOTE_BYTES = 8 * 1024 * 1024 // 远程响应最大 8MB
 
 const readJSONSafe = async (p) => {
@@ -58,7 +62,7 @@ const formatLocal = (ms) => {
 }
 
 // ---------- 规范化 ----------
-// 统一为内部结构：{ version, phase, channel, title, start, end, up: [], up4: [] }
+// 统一为内部结构：{ version, phase, channel, title, start, end, up: [], up4: [], upByType? }
 const normalizeBanner = (b) => ({
   version: String(b.version || ''),
   phase: String(b.phase || ''),
@@ -67,7 +71,16 @@ const normalizeBanner = (b) => ({
   start: String(b.start || ''),
   end: String(b.end || ''),
   up: (b.up || []).map((x) => String(x).trim()).filter(Boolean),
-  up4: (b.up4 || []).map((x) => String(x).trim()).filter(Boolean)
+  up4: (b.up4 || []).map((x) => String(x).trim()).filter(Boolean),
+  // 混合池（角色+武器分开列 UP 名单）
+  ...(b.upByType
+    ? {
+        upByType: {
+          character: (b.upByType.character || []).map((x) => String(x).trim()).filter(Boolean),
+          weapon: (b.upByType.weapon || []).map((x) => String(x).trim()).filter(Boolean)
+        }
+      }
+    : {})
 })
 
 const normalizeSet = (set) => {
@@ -95,13 +108,21 @@ const normalizeSet = (set) => {
 // 合并时保留 base 的 start（上游按「版本更新或上一期结束时间推定」，比远端推定更准）。
 // end 仅在「日期」发生变化时才更新（真正的排期修正）；秒级差异忽略。
 const bannerKey = (b) => `${b.channel}@${String(b.end || '').slice(0, 10)}`
-const upSetKey = (b) => b.up.slice().sort().join('|')
+const upSetKey = (b) => (b.up || []).slice().sort().join('|')
 
 // 结束时间是否发生了实质变化（日期不同才算）
 const endChanged = (a, b) => String(a || '').slice(0, 10) !== String(b || '').slice(0, 10)
 
 const mergeBanners = (base, incoming) => {
-  const result = base.map((b) => ({ ...b, up: [...(b.up || [])], up4: [...(b.up4 || [])] }))
+  const cloneBanner = (b) => ({
+    ...b,
+    up: [...(b.up || [])],
+    up4: [...(b.up4 || [])],
+    ...(b.upByType
+      ? { upByType: { character: [...(b.upByType.character || [])], weapon: [...(b.upByType.weapon || [])] } }
+      : {})
+  })
+  const result = base.map(cloneBanner)
   const baseUsed = new Array(result.length).fill(false)
   const incomingUsed = new Array(incoming.length).fill(false)
   let added = 0
@@ -151,7 +172,15 @@ const mergeBanners = (base, incoming) => {
         result[bi] = {
           ...result[bi],
           end: eChanged ? incoming[matched].end : result[bi].end,
-          up: [...incoming[matched].up]
+          up: [...(incoming[matched].up || [])],
+          ...(incoming[matched].upByType
+            ? {
+                upByType: {
+                  character: [...(incoming[matched].upByType.character || [])],
+                  weapon: [...(incoming[matched].upByType.weapon || [])]
+                }
+              }
+            : {})
         }
       } else {
         remainingI.push(bi)
@@ -172,7 +201,15 @@ const mergeBanners = (base, incoming) => {
       result[bi] = {
         ...result[bi],
         end: eChanged ? incoming[ii].end : result[bi].end,
-        up: [...incoming[ii].up]
+        up: [...(incoming[ii].up || [])],
+        ...(incoming[ii].upByType
+          ? {
+              upByType: {
+                character: [...(incoming[ii].upByType.character || [])],
+                weapon: [...(incoming[ii].upByType.weapon || [])]
+              }
+            }
+          : {})
       }
     }
   }
@@ -180,7 +217,7 @@ const mergeBanners = (base, incoming) => {
   // 4. incoming 中没配上的 → 新卡池
   for (let i = 0; i < incoming.length; i++) {
     if (incomingUsed[i]) continue
-    result.push({ ...incoming[i], up: [...(incoming[i].up || [])], up4: [...(incoming[i].up4 || [])] })
+    result.push(cloneBanner(incoming[i]))
     added++
   }
 
@@ -200,18 +237,42 @@ const saveOverride = async (game, set) => {
   await writeJSONSafe(p, set)
 }
 
+// ---------- 集录祈愿开始时间补齐 ----------
+// 「集录祈愿」与同版本同相位的角色池同期开放，其 wiki 上的起始时间是
+// 「X版本更新后」这类文字描述，无法直接解析。
+// 这里用内置角色池的同期开始时间补齐（内置数据的上游推定更准）。
+const fillJiluStarts = (banners) => {
+  const charPools = banners.filter((b) => b.channel === 'character')
+  return banners.map((b) => {
+    if (b.channel !== 'jilu' || b.start) return b
+    const same = charPools.filter((c) => c.version === b.version && (!b.phase || c.phase === b.phase))
+    const pool = same.length ? same : charPools.filter((c) => c.version === b.version)
+    if (!pool.length) return b
+    const start = pool.map((c) => c.start).filter(Boolean).sort()[0]
+    return start ? { ...b, start } : b
+  })
+}
+
 // ---------- 合并内置 + 覆盖层 ----------
 const getLocalBanners = async (game) => {
   const builtin = normalizeSet(builtinBanners[game])
+  // 原神额外合并「集录祈愿」内置数据（独立 channel，与主源不冲突）
+  const extra = game === 'genshin' ? normalizeSet(genshinJilu) : null
+  const builtinAll = extra && extra.banners.length
+    ? mergeBanners(builtin.banners, extra.banners).banners
+    : builtin.banners
+
   const override = await getOverride(game)
-  if (!override || !override.banners.length) return builtin
-  const merged = mergeBanners(builtin.banners, override.banners)
+  if (!override || !override.banners.length) {
+    return { ...builtin, banners: fillJiluStarts(builtinAll) }
+  }
+  const merged = mergeBanners(builtinAll, override.banners)
   return {
     source: override.source || builtin.source,
     timezone: 'UTC+8',
     updated: override.updated || builtin.updated,
     note: override.note || builtin.note,
-    banners: merged.banners
+    banners: fillJiluStarts(merged.banners)
   }
 }
 
@@ -438,17 +499,40 @@ const nameKeys = (s) => {
   return [raw, plain, stripped]
 }
 
-const isUpAt = (banners, channel, name, timeMs) => {
+const isUpAt = (banners, channel, name, timeMs, itemType) => {
   const active = bannersAt(banners, channel, timeMs)
   if (!active.length) return { up: false, known: false }
   const keys = nameKeys(name)
   for (const b of active) {
-    for (const u of b.up) {
+    // 混合池（原神集录祈愿）：角色与武器的 UP 名单分开，按记录类型取用
+    let list = b.up || []
+    if (b.upByType && itemType) {
+      const t = String(itemType)
+      if (/角色|代理/.test(t)) list = b.upByType.character || []
+      else if (/武器|光锥|音擎/.test(t)) list = b.upByType.weapon || []
+    }
+    for (const u of list) {
       const uk = nameKeys(u)
       if (uk.some((x) => keys.some((y) => x === y))) return { up: true, known: true }
     }
   }
   return { up: false, known: true }
+}
+
+// ---------- 歪率统计排除 ----------
+// 某些池无法判定 UP/歪（如原神集录祈愿的定轨目标由玩家自选，官方不返回），
+// 这些池的记录不参与歪率统计，但仍可在明细中展示。
+const isDeviationExcluded = (game, poolKey) => {
+  const g = games[game]
+  if (!g || !Array.isArray(g.noDeviationPools)) return false
+  return g.noDeviationPools.includes(String(poolKey))
+}
+
+// 抽卡记录池 → 卡池排期 channel（未映射的池返回空串，表示无排期数据）
+const poolToChannel = (game, poolKey) => {
+  const g = games[game]
+  if (!g || !g.poolChannel) return ''
+  return g.poolChannel[String(poolKey)] || ''
 }
 
 module.exports = {
@@ -463,6 +547,8 @@ module.exports = {
   sameBannerSet,
   bannersAt,
   isUpAt,
+  isDeviationExcluded,
+  poolToChannel,
   parseLocal,
   formatLocal,
   normalizeSet,

@@ -400,3 +400,82 @@ describe('米游社公告解析（扩展）', () => {
     expect(mh.detectChannel('音擎', '')).toBe('engine')
   })
 })
+
+describe('原神集录祈愿（jilu 混合池）', () => {
+  const jiluSet = JSON.parse(fs.readFileSync(path.join(builtinDir, 'genshin-jilu.json'), 'utf8'))
+
+  test('内置集录数据应包含 8 期且 UP 名单按类型分列', () => {
+    expect(jiluSet.banners.length).toBe(8)
+    for (const b of jiluSet.banners) {
+      expect(b.channel).toBe('jilu')
+      expect(b.upByType).toBeDefined()
+      expect(Array.isArray(b.upByType.character)).toBe(true)
+      expect(Array.isArray(b.upByType.weapon)).toBe(true)
+    }
+  })
+
+  test('每期开始时间与结束时间都存在', () => {
+    for (const b of jiluSet.banners) {
+      expect(b.start).toBeTruthy()
+      expect(b.end).toBeTruthy()
+    }
+  })
+
+  test('武器 UP 与角色 UP 不应互相污染', () => {
+    const b = jiluSet.banners.find((x) => x.title === '炎天铸名')
+    expect(b.upByType.character).toContain('玛拉妮')
+    expect(b.upByType.weapon).toContain('冲浪时光')
+    expect(b.upByType.weapon).not.toContain('玛拉妮')
+    expect(b.upByType.character).not.toContain('冲浪时光')
+  })
+
+  test('isUpAt 按 item_type 分别取用 UP 名单', () => {
+    const banners = bannerModule.normalizeSet(jiluSet).banners
+    const t = bannerModule.parseLocal('2026-11-25 00:00:00')
+    expect(bannerModule.isUpAt(banners, 'jilu', '玛拉妮', t, '角色').up).toBe(true)
+    expect(bannerModule.isUpAt(banners, 'jilu', '冲浪时光', t, '武器').up).toBe(true)
+    expect(bannerModule.isUpAt(banners, 'jilu', '玛拉妮', t, '武器').up).toBe(false)
+  })
+
+  test('池 500 映射到 jilu channel 且排除歪率统计', () => {
+    expect(bannerModule.poolToChannel('genshin', '500')).toBe('jilu')
+    expect(bannerModule.isDeviationExcluded('genshin', '500')).toBe(true)
+    expect(bannerModule.isDeviationExcluded('genshin', '301')).toBe(false)
+    expect(bannerModule.isDeviationExcluded('genshin', '302')).toBe(false)
+  })
+
+  test('常驻/新手池也排除歪率统计', () => {
+    expect(bannerModule.isDeviationExcluded('genshin', '200')).toBe(true)
+    expect(bannerModule.isDeviationExcluded('genshin', '100')).toBe(true)
+    expect(bannerModule.isDeviationExcluded('hkrpg', '1')).toBe(true)
+    expect(bannerModule.isDeviationExcluded('nap', '1')).toBe(true)
+  })
+
+  test('本地合并后应同时含角色池/武器池/集录池', async () => {
+    const all = await bannerModule.getLocalBanners('genshin')
+    const chans = new Set(all.banners.map((b) => b.channel))
+    expect(chans.has('character')).toBe(true)
+    expect(chans.has('weapon')).toBe(true)
+    expect(chans.has('jilu')).toBe(true)
+    const jilu = all.banners.filter((b) => b.channel === 'jilu')
+    expect(jilu.length).toBe(8)
+    for (const b of jilu) expect(b.upByType).toBeDefined()
+  })
+
+  test('集录期与同版本角色池同期（结束时间一致，开始时间以 wiki 为准）', () => {
+    const all = bannerModule.normalizeSet(
+      JSON.parse(fs.readFileSync(path.join(builtinDir, 'genshin.json'), 'utf8'))
+    ).banners
+    for (const j of jiluSet.banners) {
+      const same = all.filter((c) => c.channel === 'character' && c.version === j.version && c.phase === j.phase)
+      if (!same.length) continue
+      // 结束时间只精确到分钟比较（wiki 用 :00，内置用 :59）
+      const ends = [...new Set(same.map((c) => c.end.slice(0, 16)))].sort()
+      expect(ends).toContain(j.end.slice(0, 16))
+      // 开始时间应落在角色池同期区间附近（允许 ±2 天）
+      const poolStart = Math.min(...same.map((c) => bannerModule.parseLocal(c.start)))
+      const diff = Math.abs(bannerModule.parseLocal(j.start) - poolStart)
+      expect(diff).toBeLessThan(2 * 86400000)
+    }
+  })
+})
