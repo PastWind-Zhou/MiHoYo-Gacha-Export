@@ -1,14 +1,19 @@
 // 米游社官方 wiki 卡池源（应急备用）
 //
-// 仅同步「当期卡池」：
-//   1. gacha_pool 接口拿当期卡池（标题、时间区间、公告链接、卡池类型）
+// 仅同步「当期卡池」。数据来源：
+//   1. gacha_pool 接口 —— 当期卡池的「代号 + 时间区间」
 //      https://act-api-takumi.mihoyo.com/common/blackboard/<app_sn>/v1/gacha_pool
-//   2. 公告正文 API 拿 UP 物品名
+//   2. 公告正文 API —— 当期卡池的「UP 物品 + 品类（角色/光锥/武器/音擎）」
 //      https://bbs-api.mihoyo.com/post/wapi/getPostFull?post_id=<id>
-//      正文形如「活动期间，限定S级代理人[赛维里安(风·强攻)]的调频获取概率将大幅提升！」
 //
-// 三个游戏的 app_sn：
-//   zzz_wiki（绝区零绳网情报站） / sr_wiki（星穹铁道观测枢） / ys_obc（原神）
+// 关键：gacha_pool 的 list 里每个条目是一个卡池「代号」，其 pool[] 数组指向该
+// 代号下的多个词条，但其中混有 4 星角色、突破材料等无关词条，不能作为 UP 依据。
+// 真正的 UP 名单在公告正文里，且角色池与光锥/武器池分列不同的「●」行。
+//
+// 三个游戏的公告格式：
+//   绝区零：独立标题行「「答案在风中」调频活动」+ 方括号 [名字(属性)]
+//   星铁：  ▌ 分段，段内每个 ● 行一个卡池（标题与描述同行，书名号）
+//   原神：  每个公告一篇，对应一个角色池（武器池在米游社 wiki 无入口）
 //
 // 无需登录、无需 DS 签名。
 
@@ -48,41 +53,37 @@ const postToLines = (html) => String(html || '')
   .map((l) => l.trim())
   .filter(Boolean)
 
-// 从公告正文提取 UP 物品
-//
-// 三个游戏的公告格式不同：
-//   绝区零：活动期间，限定S级代理人[赛维里安(风·强攻)]的调频获取概率将大幅提升！
-//            （卡池名在上一行：「「答案在风中」调频活动」）
-//   星铁：  ● 「愚戏众星」角色活动跃迁期间，限定5星角色「星神★阿哈（欢愉•量子）」，…跃迁成功概率限时提升。
-//            （卡池名与描述同行）
-//   原神：  ●活动期间，限定5星角色「驹隙隐泉·兹白(岩)」的祈愿获取概率将大幅提升！
-//            （正文无卡池名，取自公告标题）
-//
-// 正则必须严格：一旦品类词（角色/代理人/…）出现就立即取随后的第一个名字，
-// 否则会一路贪婪匹配到 4 星角色。
+// 「限定5星角色「名字」」/「限定S级代理人[名字]」
+// 品类词一旦出现就立即取随后的第一个名字，避免贪婪匹配到 4 星角色
 const UP_ITEM_RE = /限定(?:5星|S级)?\s*(角色|代理人|光锥|武器|音擎)?\s*[\[「]([^\]」]+)[\]」]/
 // 独立的卡池标题行：「「卡池名」调频活动」/「「卡池名」祈愿」/「「卡池名」跃迁」
 const TITLE_LINE_RE = /^「(.+?)」\s*(调频活动|祈愿|跃迁|角色活动|武器活动|光锥活动)/
+// 段落分隔：▌ 表示一个批次（如「角色池+光锥池」同时开启）
+const SECTION_RE = /^▌/
 
+// 解析公告正文 → 当期卡池列表
+// 每项：{ title: 卡池名, up: UP物品名, category: 品类, section: 批次序号 }
 const parseUpsFromPost = (html, subject = '') => {
   const lines = postToLines(html)
   const ups = []
-
-  // 原神：公告标题形如「「华黍由仪」祈愿：「驹隙隐泉·兹白(岩)」概率UP！」
-  const subjMatch = String(subject || '').match(/^「(.+?)」.*?「([^」]+)」/)
-  if (subjMatch) {
-    const name = subjMatch[2].replace(/[（(][^）)]*[）)]\s*$/, '').trim()
-    if (name) ups.push({ title: subjMatch[1], up: name, desc: subject, category: '' })
-  }
-
-  // 扫描：记录最近的独立标题行，作为后续描述行的卡池名
+  let section = -1
   let pendingTitle = ''
+
   for (const line of lines) {
+    if (SECTION_RE.test(line)) {
+      section++
+      pendingTitle = ''
+      continue
+    }
+    // 独立卡池标题行（绝区零格式）：记住它，后续描述行归属于它。
+    // 每个独立标题行也代表一个新段（绝区零的每个卡池单独成段）。
     const titleLine = line.match(TITLE_LINE_RE)
     if (titleLine) {
       pendingTitle = titleLine[1]
+      section++
       continue
     }
+
     const itemMatch = line.match(UP_ITEM_RE)
     if (!itemMatch) continue
 
@@ -102,27 +103,34 @@ const parseUpsFromPost = (html, subject = '') => {
       if (sm) title = sm[1]
     }
     if (!title) continue
-    ups.push({ title, up, desc: line, category: itemMatch[1] || '' })
+
+    ups.push({ title, up, category: itemMatch[1] || '', desc: line, section })
   }
 
-  // 同一卡池名保留第一个
+  // 去重（同一卡池名+UP 只保留一条）
   const seen = new Set()
   return ups.filter((u) => {
-    if (seen.has(u.title + '|' + u.up)) return false
-    seen.add(u.title + '|' + u.up)
+    const k = u.title + '|' + u.up
+    if (seen.has(k)) return false
+    seen.add(k)
     return true
   })
 }
 
-// 判断卡池类型（角色 / 武器 / 光锥 / 音擎）
-// 依据描述 UP 的品类词，比卡池代号更可靠
-const detectChannel = (title, upName, desc) => {
-  const t = [title, upName, desc].filter(Boolean).join(' ')
+// 判断卡池类型
+const detectChannel = (category, desc) => {
+  const t = (category || '') + ' ' + (desc || '')
   if (/音擎/.test(t)) return 'engine'
   if (/光锥/.test(t)) return 'lightcone'
   if (/武器/.test(t)) return 'weapon'
   return 'character'
 }
+
+// 标题归一化：去掉「」与卡池类型后缀，便于与 gacha_pool 的 title 对齐
+const normTitle = (t) => String(t || '')
+  .replace(/[「」『』]/g, '')
+  .replace(/(调频活动|祈愿|跃迁|活动跃迁|角色活动跃迁|光锥活动跃迁|武器活动祈愿|角色活动祈愿)$/g, '')
+  .trim()
 
 // 拉取米游社当期卡池
 const fetchMihoyoBanners = async (game) => {
@@ -134,15 +142,18 @@ const fetchMihoyoBanners = async (game) => {
   const list = (poolRes.data && poolRes.data.list) || []
   if (!list.length) throw new Error('gacha_pool returned empty list')
 
-  // 收集公告文章 id（activity_url 形如 https://www.miyoushe.com/sr/article/79466344）
-  const postIds = new Set()
-  for (const item of list) {
-    const m = String(item.activity_url || '').match(/article\/(\d+)/)
-    if (m) postIds.add(m[1])
-  }
+  // 卡池代号 -> 时间区间（含所属公告 postId）
+  const periods = list.map((x) => ({
+    title: normTitle(x.title),
+    rawTitle: x.title,
+    start: x.start_time || '',
+    end: x.end_time || '',
+    postId: (String(x.activity_url || '').match(/article\/(\d+)/) || [])[1]
+  }))
 
-  // 抓公告正文，解析出「卡池名 -> UP」
-  const upMap = new Map()
+  // 抓所有公告，解析出全部当期卡池（按 postId 分组）
+  const postIds = [...new Set(periods.map((p) => p.postId).filter(Boolean))]
+  const parsed = []
   for (const postId of postIds) {
     let post
     try {
@@ -153,63 +164,69 @@ const fetchMihoyoBanners = async (game) => {
     }
     if (!post || !post.content) continue
     for (const item of parseUpsFromPost(post.content, post.subject || '')) {
-      if (!upMap.has(item.title)) upMap.set(item.title, item)
+      parsed.push({ ...item, postId })
     }
   }
 
-  // 标题归一化：去掉「」、祈愿/跃迁/调频活动等后缀，便于与 gacha_pool 的 title 对齐
-  const normTitle = (t) => String(t || '')
-    .replace(/[「」『』]/g, '')
-    .replace(/(调频活动|祈愿|跃迁|活动跃迁|角色活动跃迁|光锥活动跃迁|武器活动祈愿|角色活动祈愿)$/g, '')
-    .trim()
+  if (!parsed.length) throw new Error('could not resolve UP items from mihoyo announcement')
 
-  // 组装卡池
+  // 给每个卡池分配时间。
+  //
+  // 公告结构：一个公告含若干「段落」（▌ 分隔），每段代表一批同时开放的卡池
+  //（角色池 + 光锥池，或上半 + 下半）。gacha_pool 的每个条目对应一段。
+  //
+  // 匹配规则（按段而非按单卡池）：
+  //   1. 段内任一卡池名与某代号互相包含 → 该段用该代号的时间
+  //   2. 段内无法按名称匹配 → 用同公告内剩余的代号（联动池名称与代号无关时）
   const banners = []
-  for (const item of list) {
-    const rawTitle = String(item.title || '')
-    const title = normTitle(rawTitle)
+  const usedPeriods = new Set()
 
-    // 在解析结果里找标题匹配的卡池
-    let hit = upMap.get(title)
-    if (!hit) {
-      for (const [k, v] of upMap) {
-        if (normTitle(k) === title) { hit = v; break }
+  // 按 (postId, section) 分组
+  const groups = new Map()
+  for (const item of parsed) {
+    const k = item.postId + '#' + item.section
+    if (!groups.has(k)) groups.set(k, [])
+    groups.get(k).push(item)
+  }
+
+  for (const items of groups.values()) {
+    // 1. 按名称匹配代号
+    //    注意：一个代号可能对应多个段（星铁上半同时开放多个角色池，
+    //    它们共用「铭心之萃」这一个代号），因此已用过的代号仍可复用，
+    //    只是优先选未用过的。
+    let period = null
+    for (const item of items) {
+      const nt = normTitle(item.title)
+      const cand = periods.filter((p) => {
+        if (!p.title || p.postId !== item.postId) return false
+        return nt.includes(p.title) || p.title.includes(nt)
+      })
+      if (cand.length) {
+        period = cand.find((p) => !usedPeriods.has(p)) || cand[0]
+        break
       }
     }
-    if (!hit) {
-      // 放宽：卡池名包含关系（星铁「铭心之萃」vs「铭心之萃•银狼LV.999」）
-      for (const [k, v] of upMap) {
-        const nk = normTitle(k)
-        if (nk && (nk.includes(title) || title.includes(nk))) { hit = v; break }
-      }
+    // 2. 同公告内剩余的代号（联动池等名称与代号无关的情况）
+    if (!period) {
+      const rest = periods.filter((p) => p.postId === items[0].postId && !usedPeriods.has(p))
+      if (rest.length) period = rest[0]
     }
-    if (!hit) continue
+    // 3. 兜底
+    if (!period) period = periods.find((p) => p.postId === items[0].postId) || periods[0]
+    if (period) usedPeriods.add(period)
 
-    // 卡池类型以公告中的品类词为准（角色/代理人 → character，光锥 → lightcone，
-    // 武器 → weapon，音擎 → engine）
-    const cat = hit.category || ''
-    let ch = 'character'
-    if (/音擎/.test(cat) || /音擎/.test(hit.desc)) ch = 'engine'
-    else if (/光锥/.test(cat) || /光锥/.test(hit.desc)) ch = 'lightcone'
-    else if (/武器/.test(cat) || /武器/.test(hit.desc)) ch = 'weapon'
-    const channels = new Set([ch])
-
-    for (const ch of channels) {
+    for (const item of items) {
       banners.push({
         version: '',
         phase: '',
-        channel: ch,
-        title: rawTitle,
-        start: item.start_time || '',
-        end: item.end_time || '',
-        up: [hit.up],
+        channel: detectChannel(item.category, item.desc),
+        title: item.title,
+        start: period.start,
+        end: period.end,
+        up: [item.up],
         up4: []
       })
     }
-  }
-
-  if (!banners.length) {
-    throw new Error('could not resolve UP items from mihoyo announcement')
   }
 
   return {
@@ -221,4 +238,4 @@ const fetchMihoyoBanners = async (game) => {
   }
 }
 
-module.exports = { fetchMihoyoBanners, parseUpsFromPost, detectChannel, APP_SN }
+module.exports = { fetchMihoyoBanners, parseUpsFromPost, detectChannel, normTitle, APP_SN }

@@ -324,8 +324,79 @@ describe('米游社公告 UP 解析（parseUpsFromPost）', () => {
   })
 
   test('卡池类型按品类词判定', () => {
-    expect(mh.detectChannel('x', '赛维里安', '限定S级代理人[赛维里安]')).toBe('character')
-    expect(mh.detectChannel('x', '禁罪囚笼', '限定S级音擎[禁罪囚笼]')).toBe('engine')
-    expect(mh.detectChannel('x', '当第一声阿哈响起', '限定5星光锥[当第一声阿哈响起]')).toBe('lightcone')
+    expect(mh.detectChannel('代理人', '限定S级代理人[赛维里安]')).toBe('character')
+    expect(mh.detectChannel('角色', '限定5星角色[希儿]')).toBe('character')
+    expect(mh.detectChannel('音擎', '限定S级音擎[禁罪囚笼]')).toBe('engine')
+    expect(mh.detectChannel('光锥', '限定5星光锥[当第一声阿哈响起]')).toBe('lightcone')
+    expect(mh.detectChannel('武器', '限定5星武器[雾切之回光]')).toBe('weapon')
+  })
+})
+
+describe('名称引号归一化', () => {
+  const banners = [{
+    channel: 'lightcone',
+    start: '2026-01-01 00:00:00',
+    end: '2026-02-01 00:00:00',
+    up: ['当第一声「阿哈」响起']
+  }]
+  const t = bannerModule.parseLocal('2026-01-15 00:00:00')
+
+  test('原样匹配', () => {
+    expect(bannerModule.isUpAt(banners, 'lightcone', '当第一声「阿哈」响起', t).up).toBe(true)
+  })
+
+  test('米游社的『』写法也能匹配', () => {
+    expect(bannerModule.isUpAt(banners, 'lightcone', '当第一声『阿哈』响起', t).up).toBe(true)
+  })
+
+  test('无引号写法也能匹配', () => {
+    expect(bannerModule.isUpAt(banners, 'lightcone', '当第一声阿哈响起', t).up).toBe(true)
+  })
+
+  test('不同物品仍判为歪', () => {
+    expect(bannerModule.isUpAt(banners, 'lightcone', '拂晓之前', t).up).toBe(false)
+  })
+
+  test('名字中间的引号不影响匹配', () => {
+    const b2 = [{ channel: 'character', start: '2026-01-01 00:00:00', end: '2026-02-01 00:00:00', up: ['「11号」'] }]
+    expect(bannerModule.isUpAt(b2, 'character', '「11号」', t).up).toBe(true)
+    expect(bannerModule.isUpAt(b2, 'character', '「11」号', t).up).toBe(true)
+  })
+})
+
+describe('米游社公告解析（扩展）', () => {
+  const mh = require('../module/mihoyoBanner')
+
+  test('星铁：同一段内角色池与光锥池分别成条', () => {
+    const html = '<p>▌「愚戏众星」「流光定影•当第一声『阿哈』响起」活动跃迁</p>' +
+      '<p>● 「愚戏众星」角色活动跃迁期间，限定5星角色「星神★阿哈（欢愉•量子）」，4星角色「驭空」跃迁成功概率限时提升。</p>' +
+      '<p>● 「流光定影•当第一声『阿哈』响起」光锥活动跃迁期间，限定5星光锥「当第一声『阿哈』响起（欢愉）」跃迁成功概率限时提升。</p>'
+    const ups = mh.parseUpsFromPost(html)
+    expect(ups.length).toBe(2)
+    expect(ups[0].up).toBe('星神★阿哈')
+    expect(ups[0].category).toBe('角色')
+    expect(ups[1].up).toBe('当第一声『阿哈』响起')
+    expect(ups[1].category).toBe('光锥')
+    expect(ups[0].section).toBe(ups[1].section)
+  })
+
+  test('绝区零：每个独立标题行自成一段', () => {
+    const html = '<p>「答案在风中」调频活动</p><p>活动期间，限定S级代理人[赛维里安(风·强攻)]的调频获取概率将大幅提升！</p>' +
+      '<p>「禁罪囚笼」调频活动</p><p>活动期间，限定S级音擎[禁罪囚笼(强攻)]的调频获取概率将大幅提升！</p>'
+    const ups = mh.parseUpsFromPost(html)
+    expect(ups.length).toBe(2)
+    expect(ups[0].title).toBe('答案在风中')
+    expect(ups[0].category).toBe('代理人')
+    expect(ups[1].title).toBe('禁罪囚笼')
+    expect(ups[1].category).toBe('音擎')
+    expect(ups[0].section).not.toBe(ups[1].section)
+  })
+
+  test('卡池类型判定覆盖四种品类', () => {
+    expect(mh.detectChannel('角色', '')).toBe('character')
+    expect(mh.detectChannel('代理人', '')).toBe('character')
+    expect(mh.detectChannel('光锥', '')).toBe('lightcone')
+    expect(mh.detectChannel('武器', '')).toBe('weapon')
+    expect(mh.detectChannel('音擎', '')).toBe('engine')
   })
 })

@@ -426,14 +426,26 @@ const bannersAt = (banners, channel, timeMs) => {
 
 // 判断某物品在某时刻是否为当期 UP
 // 返回 { up, known }：known=false 表示该时刻没有卡池数据，无法判定
-const nameKey = (s) => String(s || '').trim().replace(/^[「『"]/, '').replace(/[」』"]$/, '').split(/\s+/).join(' ')
+//
+// 名称归一化：不同数据源的引号写法不一致（米游社用『』、内置基线用「」、
+// 抽卡记录用「」或无引号），因此比较时同时尝试「原样」与「去引号」两种形式。
+const nameKeys = (s) => {
+  const raw = String(s || '').trim()
+  const plain = raw
+    .replace(/[「」『』"'“”]/g, '')
+    .split(/\s+/).join(' ')
+  const stripped = raw.replace(/^[「『"'“]|[」』"'”]$/g, '').split(/\s+/).join(' ')
+  return [raw, plain, stripped]
+}
+
 const isUpAt = (banners, channel, name, timeMs) => {
   const active = bannersAt(banners, channel, timeMs)
   if (!active.length) return { up: false, known: false }
-  const n = nameKey(name)
+  const keys = nameKeys(name)
   for (const b of active) {
     for (const u of b.up) {
-      if (nameKey(u) === n) return { up: true, known: true }
+      const uk = nameKeys(u)
+      if (uk.some((x) => keys.some((y) => x === y))) return { up: true, known: true }
     }
   }
   return { up: false, known: true }
