@@ -8,11 +8,9 @@ const windowStateKeeper = require('electron-window-state')
 const debounce = require('lodash/debounce')
 const { glob } = require('glob')
 
-const isDev = !app.isPackaged
+const { isDev, appRoot, userDataPath } = require('./paths')
 
 const userPath = app.getPath('userData')
-const appRoot = isDev ? path.resolve(__dirname, '..', '..') : path.resolve(app.getAppPath(), '..', '..')
-const userDataPath = path.resolve(appRoot, 'userData')
 // const globalUserDataPath = path.resolve(userPath, 'userData')
 
 let win = null
