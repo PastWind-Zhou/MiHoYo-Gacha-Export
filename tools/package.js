@@ -1,17 +1,20 @@
-// 打包脚本：组装 win 免安装目录并压缩为 zip
-//   目录名 / 包名 = <productName>-<version>（自动跟随 package.json 的版本号）
-//   用法：node tools/package.js
+// 正式打包脚本：输出统一放在仓库根目录的 release/ 内
+//   release/<productName>-<version>/                 免安装目录（含本地 userData）
+//   release/<productName>-<version>-win.zip          程序压缩包（不含 userData）
+//   release/<productName>-<version>-source.zip       源码压缩包（git 跟踪文件，不含 userData/构建产物/docs）
+// 用法：node tools/package.js
 const fs = require('fs')
 const path = require('path')
-const { spawnSync } = require('child_process')
+const { spawnSync, execFileSync } = require('child_process')
 
 const root = path.resolve(__dirname, '..')
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 const productName = pkg.build.productName
 const version = pkg.version
-const buildDir = path.join(root, 'build')
-const stage = path.join(buildDir, `${productName}-${version}`)
-const zipPath = path.join(buildDir, `${productName}-${version}-win.zip`)
+const releaseDir = path.join(root, 'release')
+const stage = path.join(releaseDir, `${productName}-${version}`)
+const appZip = path.join(releaseDir, `${productName}-${version}-win.zip`)
+const sourceZip = path.join(releaseDir, `${productName}-${version}-source.zip`)
 // Electron 运行时位置：
 //   1. 项目内 node_modules/electron/dist（正常安装依赖的情况）
 //   2. 环境变量 ELECTRON_DIST 指定
@@ -70,26 +73,24 @@ if (!electronDist) {
   process.exit(1)
 }
 
-// 1. 备份已有 userData（用户数据不随包分发，但要留在本地目录）
-//
-// 注意：打包会清空 build 目录下的旧版本目录，而 userData 存在那些目录里，
-// 因此这里要扫描所有历史版本目录，取最近修改的一份备份下来，避免升级版本时丢数据。
-const userDataBackup = path.join(buildDir, '_userData_backup')
+// 1. 备份已有 userData（用户数据不随包分发，但要留在本地运行目录）
+//    扫描历史版本目录（build/ 与 release/ 都要看），取最近修改的一份，避免升级版本时丢数据。
+const userDataBackup = path.join(releaseDir, '_userData_backup')
 fs.rmSync(userDataBackup, { recursive: true, force: true })
 
 const findUserDataDirs = () => {
-  if (!fs.existsSync(buildDir)) return []
-  return fs.readdirSync(buildDir)
-    .filter((name) => name !== 'icons' && !name.startsWith('_'))
-    .map((name) => path.join(buildDir, name, 'userData'))
-    .filter((p) => {
+  const dirs = []
+  for (const base of [path.join(root, 'build'), releaseDir]) {
+    if (!fs.existsSync(base)) continue
+    for (const name of fs.readdirSync(base)) {
+      if (name.startsWith('_') || name === 'icons') continue
+      const p = path.join(base, name, 'userData')
       try {
-        return fs.existsSync(p) && fs.statSync(p).isDirectory()
-      } catch (e) {
-        return false
-      }
-    })
-    .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)
+        if (fs.existsSync(p) && fs.statSync(p).isDirectory()) dirs.push(p)
+      } catch (e) {}
+    }
+  }
+  return dirs.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)
 }
 
 const userDataDirs = findUserDataDirs()
@@ -98,11 +99,11 @@ if (userDataDirs.length) {
   log(`已备份 userData（来自 ${path.basename(path.dirname(userDataDirs[0]))}）`)
 }
 
-// 2. 清空旧的打包产物（保留 icons）
-fs.mkdirSync(buildDir, { recursive: true })
-for (const name of fs.readdirSync(buildDir)) {
-  if (name === 'icons' || name === '_userData_backup') continue
-  fs.rmSync(path.join(buildDir, name), { recursive: true, force: true })
+// 2. 清空 release 下的旧打包产物（保留本次备份目录）
+fs.mkdirSync(releaseDir, { recursive: true })
+for (const name of fs.readdirSync(releaseDir)) {
+  if (name === '_userData_backup') continue
+  fs.rmSync(path.join(releaseDir, name), { recursive: true, force: true })
 }
 
 // 3. 组装免安装目录：electron 运行时 + 我们的应用
@@ -131,21 +132,61 @@ if (fs.existsSync(userDataBackup)) {
   log('已放回 userData')
 }
 
-// 5. 压缩（不含 userData），使用 Windows 原生 ZipFile，资源管理器兼容性最好
+// 5. 压缩程序包（临时移出 userData，确保 zip 内不含真实记录），Windows 原生 ZipFile，资源管理器兼容性最好
 const udStage = path.join(stage, 'userData')
-const udTmp = path.join(buildDir, '_userData_tmp')
+const udTmp = path.join(releaseDir, '_userData_tmp')
 fs.rmSync(udTmp, { recursive: true, force: true })
 if (fs.existsSync(udStage)) fs.renameSync(udStage, udTmp)
 
-log('压缩中（Windows 原生 ZipFile）…')
-const ps = `Compress-Archive -Path "${stage}\\*" -DestinationPath "${zipPath}" -CompressionLevel Optimal`
-const r = spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8' })
+log('压缩程序包（Windows 原生 ZipFile）…')
+const zipWithRetry = (source, dest, keepRoot = false) => {
+  // keepRoot=true 时压缩目录本身（带顶层目录名）；否则压缩目录内容（平铺，exe 在 zip 根）
+  const target = keepRoot ? source : `${source}\\*`
+  const ps = `Compress-Archive -Path "${target}" -DestinationPath "${dest}" -CompressionLevel Optimal`
+  for (let i = 0; i < 3; i++) {
+    const r = spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8' })
+    if (r.status === 0) return
+    if (i === 2) {
+      fs.writeSync(2, '压缩失败: ' + (r.stdout || '') + (r.stderr || '') + '\n')
+      process.exit(1)
+    }
+  }
+}
+zipWithRetry(stage, appZip)
 if (fs.existsSync(udTmp)) fs.renameSync(udTmp, udStage)
-if (r.status !== 0) {
-  fs.writeSync(2, '压缩失败: ' + (r.stdout || '') + (r.stderr || '') + '\n')
+
+// 6. 源码包：git 跟踪的文件，排除 userData / 构建产物 / docs / 本 release 目录
+//    与 GitHub Release 的 Source code 一致：带顶层目录 <productName>-<version>/
+log('生成源码包…')
+const sourceStage = path.join(releaseDir, '_source_stage')
+const sourceRoot = path.join(sourceStage, `${productName}-${version}`)
+fs.rmSync(sourceStage, { recursive: true, force: true })
+fs.mkdirSync(sourceRoot, { recursive: true })
+let tracked
+try {
+  tracked = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' })
+    .split('\0')
+    .filter(Boolean)
+} catch (e) {
+  fs.writeSync(2, '无法读取 git 跟踪文件列表：' + (e.stderr || e.message) + '\n')
   process.exit(1)
 }
+for (const rel of tracked) {
+  const from = path.join(root, rel)
+  const to = path.join(sourceRoot, rel)
+  try {
+    if (!fs.existsSync(from)) continue
+    fs.mkdirSync(path.dirname(to), { recursive: true })
+    fs.copyFileSync(from, to)
+  } catch (e) {
+    log('跳过无法复制的文件: ' + rel)
+  }
+}
+zipWithRetry(sourceRoot, sourceZip, true)
+fs.rmSync(sourceStage, { recursive: true, force: true })
 
-log('完成：')
-log('  目录   ' + stage)
-log('  压缩包 ' + zipPath + '  (' + (fs.statSync(zipPath).size / 1024 / 1024).toFixed(2) + ' MB)')
+// 7. 完成
+log('完成（release/）：')
+log('  目录     ' + stage)
+log('  程序包   ' + appZip + '  (' + (fs.statSync(appZip).size / 1024 / 1024).toFixed(2) + ' MB)')
+log('  源码包   ' + sourceZip + '  (' + (fs.statSync(sourceZip).size / 1024 / 1024).toFixed(2) + ' MB)')
