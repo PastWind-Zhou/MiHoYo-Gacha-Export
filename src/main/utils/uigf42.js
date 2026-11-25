@@ -17,6 +17,9 @@ const GENSHIN_UIGF_TYPE = {
   '500': '500'
 }
 
+// UIGF v4.2 规定 uigf_gacha_type 的取值范围（仅原神使用该字段）
+const UIGF_GACHA_TYPES = ['100', '200', '301', '302', '500']
+
 // 原神千星奇域（hk4e_ugc）卡池类型，与 games.js / UIGF v4.2 Schema 保持一致
 const UGC_TYPES = games.genshin.ugcPools
 
@@ -44,9 +47,18 @@ const uigfGachaTypeOf = (gameId, gachaType) => {
   return GENSHIN_UIGF_TYPE[type] || type
 }
 
+// 记录 id 可能是脏数据（非纯数字），排序时容错按 0 处理，避免导出直接抛错
+const toBigInt = (value) => {
+  try {
+    return BigInt(String(value ?? '').trim() || '0')
+  } catch (e) {
+    return 0n
+  }
+}
+
 const sortByRecordId = (a, b) => {
-  const av = BigInt(String(a.id || '0')) || 0n
-  const bv = BigInt(String(b.id || '0')) || 0n
+  const av = toBigInt(a.id)
+  const bv = toBigInt(b.id)
   return av > bv ? 1 : av < bv ? -1 : 0
 }
 
@@ -70,11 +82,17 @@ const toUIGFRecord = ({ gameId, log, itemId = '' }) => {
 }
 
 // UIGF list 项 → 本地记录；按 uigf_gacha_type 分组后再落盘
-const groupUIGFRecords = (records) => {
+//
+// allowedUigfTypes：允许作为分组键的 uigf_gacha_type 取值白名单。
+//   - 原神：['100','200','301','302','500']（400 与 301 共用保底，UIGF 归一为 301）
+//   - 其他游戏：[] —— UIGF 只为原神定义了该字段，别人的脏数据不应改变本地分池
+// 白名单之外的取值一律回退到 gacha_type，避免记录被分到不存在的池。
+const groupUIGFRecords = (records, options = {}) => {
+  const allowed = options.allowedUigfTypes || []
   const grouped = {}
   records.forEach(rec => {
     const uigfType = String(rec.uigf_gacha_type ?? '')
-    const key = uigfType || String(rec.gacha_type ?? '')
+    const key = (uigfType && allowed.includes(uigfType)) ? uigfType : String(rec.gacha_type ?? '')
     const clean = { ...rec }
     delete clean.uigf_gacha_type
     if (!grouped[key]) grouped[key] = []
@@ -182,6 +200,7 @@ const validateUIGF42 = (json) => {
 module.exports = {
   UIGF_VERSION,
   UGC_TYPES,
+  UIGF_GACHA_TYPES,
   schema,
   isUGCType,
   isSupportedV4Version,

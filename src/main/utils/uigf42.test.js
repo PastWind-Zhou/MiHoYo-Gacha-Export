@@ -5,6 +5,7 @@ const {
   makeInfo,
   uigfGachaTypeOf,
   toUIGFRecord,
+  sortByRecordId,
   groupUIGFRecords,
   normalizeUGCAccount,
   validateUIGF42,
@@ -126,10 +127,29 @@ describe('UIGF v4.2 转换', () => {
       toUIGFRecord({ gameId: 'genshin', log: genshinLog('400') }),
       { ...toUIGFRecord({ gameId: 'hkrpg', log: genshinLog('11') }), gacha_type: '12' }
     ]
-    const grouped = groupUIGFRecords(records)
+    const grouped = groupUIGFRecords(records, { allowedUigfTypes: ['100', '200', '301', '302', '500'] })
     expect(Object.keys(grouped).sort()).toEqual(['12', '301'])
     expect(grouped['301']).toHaveLength(2)
     expect(grouped['301'][0]).not.toHaveProperty('uigf_gacha_type')
+  })
+
+  test('白名单之外的 uigf_gacha_type 回退到 gacha_type，非原神忽略该字段', () => {
+    const dirty = { ...toUIGFRecord({ gameId: 'hkrpg', log: genshinLog('11') }), uigf_gacha_type: '301' }
+    const hkrpgGrouped = groupUIGFRecords([dirty], { allowedUigfTypes: [] })
+    expect(Object.keys(hkrpgGrouped)).toEqual(['11'])
+
+    const illegal = { ...toUIGFRecord({ gameId: 'genshin', log: genshinLog('400') }), uigf_gacha_type: '999' }
+    const genshinGrouped = groupUIGFRecords([illegal], { allowedUigfTypes: ['100', '200', '301', '302', '500'] })
+    expect(Object.keys(genshinGrouped)).toEqual(['400'])
+  })
+
+  test('脏 id 不会让排序抛错', () => {
+    const list = [{ id: 'abc' }, { id: '1234567890123456789' }, { id: '' }]
+    expect(() => list.slice().sort(sortByRecordId)).not.toThrow()
+    const sorted = list.slice().sort(sortByRecordId).map((x) => String(x.id))
+    // 非法 id 一律按 0 处理（相对顺序保持），合法数字 id 排在后面
+    expect(sorted.slice(0, 2).sort()).toEqual(['', 'abc'])
+    expect(sorted[2]).toBe('1234567890123456789')
   })
 })
 

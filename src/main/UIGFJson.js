@@ -10,6 +10,7 @@ const { sendMsg, userDataPath } = require('./utils')
 const { games, idJsons } = require('./games')
 const {
   UIGF_VERSION,
+  UIGF_GACHA_TYPES,
   isSupportedV4Version,
   makeInfo,
   toUIGFRecord,
@@ -216,7 +217,10 @@ const parseAccount = async (gameId, uidData) => {
   })
 
   // 按 uigf_gacha_type（若有）分组，否则按 gacha_type
-  const resultTempGrouped = groupUIGFRecords(resultTemp)
+  // 只有原神使用 uigf_gacha_type（400 → 301），其余游戏忽略该字段
+  const resultTempGrouped = groupUIGFRecords(resultTemp, {
+    allowedUigfTypes: gameId === 'genshin' ? UIGF_GACHA_TYPES : []
+  })
   const resultMap = new Map(Object.entries(resultTempGrouped))
   const mergedData = mergeData(dataMapForGame.get(uidData.uid), { result: resultMap, uid: uidData.uid })
   let temp
