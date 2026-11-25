@@ -5,3 +5,6 @@ userData/
 *.log
 .DS_Store
 dependencies/
+
+# git filter-branch 临时目录
+.git-rewrite/
