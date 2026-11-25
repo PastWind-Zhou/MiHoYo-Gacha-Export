@@ -263,8 +263,14 @@ const readData = async (force = false) => {
 
 // 拉取歪率分析数据（独立标签页）
 const loadWaiwai = async () => {
-  const data = await ipcRenderer.invoke('GET_WAIWAI_STATS')
-  state.waiwaiStats = data
+  try {
+    const data = await ipcRenderer.invoke('GET_WAIWAI_STATS')
+    state.waiwaiStats = data
+  } catch (e) {
+    // 统计失败不影响其它功能
+    console.error('load waiwai stats failed', e)
+    state.waiwaiStats = null
+  }
 }
 
 const changeGame = async (gameId) => {
@@ -286,6 +292,8 @@ const getI18nData = async () => {
     state.i18n = data
     setTitle()
   }
+  // 卡池名称跟随语言，切换语言后刷新统计
+  await loadWaiwai()
 }
 
 const saveExcel = async () => {
@@ -360,6 +368,7 @@ const changeCurrent = async (uid) => {
   }
   state.current = uid
   await ipcRenderer.invoke('CHANGE_UID', uid)
+  await loadWaiwai()
 }
 
 const newUser = async () => {
