@@ -8,3 +8,6 @@ dependencies/
 
 # git filter-branch 临时目录
 .git-rewrite/
+
+# 内部方案文档（仅本地留存，不随开源仓库分发）
+docs/
