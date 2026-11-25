@@ -69,6 +69,30 @@ build/MiHoYoGachaExport-<版本号>-win.zip      压缩包（不含 userData，W
 - 统计组件（饼图/明细）按游戏星级层级（原神/星铁 3-4-5 星，绝区零 B-A-S 级）参数化，支持邦布分类。
 - `userData/config.json` 兼容旧配置；自动更新已停用（三合一版本无独立更新源）。
 
+## 卡池排期数据来源
+
+本工具的「歪不歪」判定依赖卡池排期数据（每期卡池的时间区间与 UP 物品名单），
+这些数据**内嵌在源码中**，来源如下：
+
+| 数据 | 期数 | 来源 | 许可 |
+|---|---|---|---|
+| `src/gachaBanner/{genshin,hkrpg,nap}.json` | 原神 300 / 星铁 236 / 绝区零 146 | [quantulr/hoyo-gacha](https://github.com/quantulr/hoyo-gacha)（其数据整理自 Biligame wiki） | MIT |
+| `src/gachaBanner/genshin-jilu.json` | 原神「集录祈愿」8 期 | [Biligame wiki 集录祈愿页](https://wiki.biligame.com/ys/集录祈愿) | CC BY-NC-SA 4.0 |
+
+Biligame wiki 数据采用 **CC BY-NC-SA 4.0**（署名-非商业性使用-相同方式共享），
+因此本项目整体在**非商业用途**下分发；若需商用请自行替换或移除相关数据。
+
+应用运行时的卡池数据同步为**三级降级链**（均为公开可访问的接口/页面）：
+
+1. **主源**：[quantulr/hoyo-gacha](https://github.com/quantulr/hoyo-gacha) 的 GitHub Raw JSON（全量历史）
+2. **备用源**：[Biligame wiki](https://wiki.biligame.com)（全量历史，HTML 解析）
+3. **应急源**：[米游社官方 wiki](https://baike.mihoyo.com)（仅当期卡池，通过官方 `gacha_pool` 与公告接口）
+
+同步策略：本地排期已覆盖当前时间则不同步；超出则联网拉取；本地无数据则全量拉取。
+与上游完全一致时不写入覆盖层，合并时始终以本地为基底，不丢失历史。
+
 ## License
 
 MIT（基于三个上游项目的 MIT 授权）
+
+> 注意：内嵌的 Biligame wiki 卡池数据受 CC BY-NC-SA 4.0 约束，整体适用于非商业用途。
