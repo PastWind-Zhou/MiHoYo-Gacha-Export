@@ -63,6 +63,9 @@ const games = {
     endpointFor: () => 'getGachaLog',
     typeParam: 'gacha_type',
     typeOrder: ['301', '302', '500', '200', '100'],
+    // UIGF v4.2 千星奇域（hk4e_ugc）卡池类型：当前仅做导入导出透传，
+    // 主动抓取与本地展示按方案推迟到 1.0.2
+    ugcPools: ['1000', '2000', '20011', '20012', '20021', '20022'],
     probeType: null,
     langFix: true,
     serverTimeZone: null,

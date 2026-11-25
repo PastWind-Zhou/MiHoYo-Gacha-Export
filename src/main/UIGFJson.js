@@ -6,8 +6,18 @@ const config = require('./config')
 const { name, version } = require('../../package.json')
 const i18n = require('./i18n')
 const { mergeData } = require('./utils/mergeData')
-const { sendMsg } = require('./utils')
+const { sendMsg, userDataPath } = require('./utils')
 const { games, idJsons } = require('./games')
+const {
+  UIGF_VERSION,
+  isSupportedV4Version,
+  makeInfo,
+  toUIGFRecord,
+  sortByRecordId,
+  groupUIGFRecords,
+  normalizeUGCAccount,
+  validateUIGF42
+} = require('./utils/uigf42')
 
 const getTimeString = () => {
   return new Date().toLocaleString('sv').replace(/[- :]/g, '').slice(0, -2)
@@ -27,22 +37,50 @@ const uidTimeZone = (uid) => {
   return 8
 }
 
+// 导出时把工具内部的短语言码还原为 UIGF Schema 要求的完整码
+const uigfLang = (lang) => {
+  if (!lang) return 'zh-cn'
+  for (const [short, full] of uigfShortLang) {
+    if (lang === short || lang === full) return full
+  }
+  return lang
+}
+
 // 原神：按名称查 item_id（内置 UIGF 字典）
 const genshinItemId = (lang, itemIdName) => {
   const dict = idJsons.genshin[lang] || idJsons.genshin['en-us'] || {}
   return dict[itemIdName] || ''
 }
 
+// 千星奇域（hk4e_ugc）：独立于常规抽卡记录存放，导入导出透传
+const ugcDir = () => path.join(userDataPath, 'genshin')
+
+const loadUGCAccounts = async () => {
+  const dir = ugcDir()
+  await fs.ensureDir(dir)
+  const files = await fs.readdir(dir)
+  const accounts = []
+  for (const fname of files) {
+    if (/^ugc-list-\d+\.json$/.test(fname)) {
+      try {
+        const account = await fs.readJSON(path.join(dir, fname))
+        const normalized = normalizeUGCAccount(account)
+        if (normalized) accounts.push(normalized)
+      } catch (e) {}
+    }
+  }
+  return accounts
+}
+
+const saveUGCAccount = async (account) => {
+  await fs.outputJSON(path.join(ugcDir(), `ugc-list-${account.uid}.json`), account)
+}
+
 const exportUIGF = async (uids) => {
   const g = games[config.game]
   const { dataMap } = getData()
   const result = {
-    info: {
-      export_timestamp: Math.ceil(Date.now() / 1000),
-      export_app: `${name}`,
-      export_app_version: `v${version}`,
-      version: 'v4.1'
-    }
+    info: makeInfo({ appName: name, appVersion: `v${version}` })
   }
   const fulldata = []
   uids.forEach(uid => {
@@ -56,36 +94,34 @@ const exportUIGF = async (uids) => {
     const listTemp = []
     for (let [type, arr] of data.result) {
       arr.forEach(log => {
-        listTemp.push({
-          gacha_id: log.gacha_id || '',
-          gacha_type: log.gacha_type,
-          item_id: log.item_id || '',
-          count: log.count || '1',
-          time: log.time,
-          name: log.name,
-          item_type: log.item_type,
-          rank_type: String(log.rank_type),
-          id: log.id
-        })
+        // 原神没有本地 item_id，用内置字典按名称补全
+        const itemId = log.item_id || (g.idMode === 'name' ? genshinItemId(data.lang, log.name) : '')
+        listTemp.push(toUIGFRecord({ gameId: config.game, log: { ...log, item_id: itemId } }))
       })
     }
-    listTemp.sort((a, b) => Number(BigInt(a.id) - BigInt(b.id)))
-    // 原神没有本地 item_id，用内置字典按名称补全
-    if (g.idMode === 'name') {
-      listTemp.forEach(item => {
-        if (!item.item_id) {
-          item.item_id = genshinItemId(data.lang, item.name)
-        }
-      })
-    }
+    listTemp.sort(sortByRecordId)
+    const timezone = g.uigfTimeZone === 'uid'
+      ? uidTimeZone(data.uid)
+      : Number(data.region_time_zone)
     accounts.push({
       uid: data.uid,
-      timezone: g.uigfTimeZone === 'uid' ? uidTimeZone(data.uid) : data.region_time_zone,
-      lang: data.lang,
+      timezone: Number.isFinite(timezone) ? timezone : 8,
+      lang: uigfLang(data.lang),
       list: listTemp
     })
   })
   result[g.uigfKey] = accounts
+  // v4.2 新增段：仅原神导出；无千星奇域数据时留空，不污染其他游戏
+  if (config.game === 'genshin') {
+    const ugcAccounts = await loadUGCAccounts()
+    if (ugcAccounts.length) result.hk4e_ugc = ugcAccounts
+  }
+
+  // 按内置官方 Schema 做导出后校验：只提示，不阻塞导出
+  const warnings = validateUIGF42(result)
+  if (warnings.length) {
+    console.warn(`[UIGF ${UIGF_VERSION}] 导出校验提示：`, warnings)
+  }
 
   const filePath = dialog.showSaveDialogSync({
     defaultPath: path.join(app.getPath('downloads'), accounts.length > 1 ? `UIGF_${getTimeString()}` : `UIGF_${accounts[0].uid}_${getTimeString()}`),
@@ -102,7 +138,7 @@ const exportUIGF = async (uids) => {
 
 // 读取某游戏目录下的本地数据（用于跨游戏导入）
 const loadGameData = async (gameId) => {
-  const dir = path.join(require('./utils').userDataPath, gameId)
+  const dir = path.join(userDataPath, gameId)
   await fs.ensureDir(dir)
   const map = new Map()
   const files = await fs.readdir(dir)
@@ -161,6 +197,10 @@ const parseAccount = async (gameId, uidData) => {
       rank_type: String(recordEntry.rank_type ?? ''),
       id: recordEntry.id
     }
+    // v4.0 起必填：400 与 301 共用保底，导入时按此字段归类
+    if (recordEntry.uigf_gacha_type) {
+      rec.uigf_gacha_type = String(recordEntry.uigf_gacha_type)
+    }
     // 绝区零：导入时把时间转换为本地时区（保持原工具行为）
     if (gameId === 'nap' && Number.isFinite(Number(uidData.timezone)) && Number.isFinite(Number(region_time_zone))) {
       rec.time = convertTimeZone(recordEntry.time, Number(uidData.timezone), Number(region_time_zone))
@@ -176,16 +216,7 @@ const parseAccount = async (gameId, uidData) => {
   })
 
   // 按 uigf_gacha_type（若有）分组，否则按 gacha_type
-  const resultTempGrouped = resultTemp.reduce((acc, curr) => {
-    const key = curr.uigf_gacha_type || curr.gacha_type
-    const clean = { ...curr }
-    delete clean.uigf_gacha_type
-    if (!acc[key]) {
-      acc[key] = []
-    }
-    acc[key].push(clean)
-    return acc
-  }, {})
+  const resultTempGrouped = groupUIGFRecords(resultTemp)
   const resultMap = new Map(Object.entries(resultTempGrouped))
   const mergedData = mergeData(dataMapForGame.get(uidData.uid), { result: resultMap, uid: uidData.uid })
   let temp
@@ -199,7 +230,7 @@ const parseAccount = async (gameId, uidData) => {
   // 落盘到对应游戏目录
   const obj = Object.assign({}, temp)
   obj.result = [...obj.result]
-  await fs.outputJSON(path.join(require('./utils').userDataPath, gameId, `gacha-list-${uidData.uid}.json`), obj)
+  await fs.outputJSON(path.join(userDataPath, gameId, `gacha-list-${uidData.uid}.json`), obj)
   config.value().currents[gameId] = uidData.uid
   // 当前游戏则同步内存
   if (gameId === config.game) {
@@ -220,7 +251,7 @@ const importUIGF = async () => {
   try {
     const jsonData = fs.readJsonSync(filepath[0])
     if (jsonData?.info?.version) {
-      if (jsonData.info.version !== 'v4.0' && jsonData.info.version !== 'v4.1') {
+      if (!isSupportedV4Version(jsonData.info.version)) {
         sendMsg('不支持此版本UIGF')
         console.error('不支持此版本UIGF')
         return
@@ -229,6 +260,11 @@ const importUIGF = async () => {
         for (const uidData of (jsonData[key] || [])) {
           await parseAccount(key, uidData)
         }
+      }
+      // v4.2 新增 hk4e_ugc：透传保存到原神目录，不混入常规卡池
+      for (const ugcAccount of (jsonData.hk4e_ugc || [])) {
+        const normalized = normalizeUGCAccount(ugcAccount)
+        if (normalized) await saveUGCAccount(normalized)
       }
     } else if (jsonData?.info?.uigf_version === 'v3.0') {
       // 原神 UIGF v3.0 单账号
