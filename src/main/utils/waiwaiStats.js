@@ -40,4 +40,38 @@ const buildWaiwaiStats = ({ game, result, banners = [], types = [] }) => {
   return { game, pools }
 }
 
-module.exports = { buildWaiwaiStats }
+// 生成 Excel「歪率分析」工作表的行数据
+// options 中的文案由调用方（主进程 i18n）传入，保持本模块不依赖 i18n
+const buildWaiwaiRows = (pools = [], options = {}) => {
+  const {
+    yes = '是',
+    no = '否',
+    excludedSuffix = ''
+  } = options
+  return (pools || []).map((p) => {
+    const s = p.stats || {}
+    const histogram = s.deviationHistogram || {}
+    return {
+      pool: `${p.name}${p.excluded ? excludedSuffix : ''}`,
+      included: p.excluded ? no : yes,
+      total: s.total ?? 0,
+      top: s.topCount ?? 0,
+      up: s.upCount ?? 0,
+      lost: s.lostCount ?? 0,
+      unknown: s.unknownCount ?? 0,
+      noDeviation: s.noDeviationCount ?? 0,
+      noDeviationRate: s.noDeviationRate ?? 0,
+      avgUp: s.avgUpPulls ?? 0,
+      avgTop: s.avgTopPulls ?? 0,
+      luckiest: s.minTopPulls ?? 0,
+      unluckiest: s.maxTopPulls ?? 0,
+      upHitRate: s.upHitRate ?? 0,
+      deviation1: histogram['1'] || 0,
+      deviation2: histogram['2'] || 0,
+      deviation3: histogram['3'] || 0,
+      guaranteed: s.guaranteedCount ?? 0
+    }
+  })
+}
+
+module.exports = { buildWaiwaiStats, buildWaiwaiRows }

@@ -1,4 +1,4 @@
-const { buildWaiwaiStats } = require('./waiwaiStats')
+const { buildWaiwaiStats, buildWaiwaiRows } = require('./waiwaiStats')
 
 const banners = [
   {
@@ -77,5 +77,62 @@ describe('歪率分析数据组装', () => {
 
   test('未知游戏返回空列表', () => {
     expect(buildWaiwaiStats({ game: 'unknown', result: new Map(), banners }).pools).toEqual([])
+  })
+})
+
+describe('Excel 行数据（buildWaiwaiRows）', () => {
+  const pools = [
+    {
+      poolKey: '11',
+      name: '角色活动跃迁',
+      channel: 'character',
+      excluded: false,
+      stats: {
+        total: 100, topCount: 10, knownCount: 10, upCount: 7, lostCount: 3, unknownCount: 0,
+        noDeviationCount: 5, noDeviationRate: 0.7143, avgUpPulls: 60.5, avgTopPulls: 50.25,
+        minTopPulls: 12, maxTopPulls: 89, upHitRate: 0.7,
+        deviationHistogram: { 1: 2, 2: 1 }, guaranteedCount: 3
+      }
+    },
+    {
+      poolKey: '1',
+      name: '常驻跃迁',
+      channel: '',
+      excluded: true,
+      stats: {
+        total: 50, topCount: 5, knownCount: 0, upCount: 0, lostCount: 0, unknownCount: 5,
+        noDeviationCount: 0, noDeviationRate: 0, avgUpPulls: 0, avgTopPulls: 0,
+        minTopPulls: 0, maxTopPulls: 0, upHitRate: 0,
+        deviationHistogram: {}, guaranteedCount: 0
+      }
+    }
+  ]
+
+  test('行数据与统计结果一一对应', () => {
+    const rows = buildWaiwaiRows(pools, { yes: '是', no: '否', excludedSuffix: '（不参与统计）' })
+    expect(rows).toHaveLength(2)
+    expect(rows[0].pool).toBe('角色活动跃迁')
+    expect(rows[0].included).toBe('是')
+    expect(rows[0].noDeviationRate).toBe(0.7143)
+    expect(rows[0].deviation1).toBe(2)
+    expect(rows[0].deviation2).toBe(1)
+    expect(rows[0].deviation3).toBe(0)
+    expect(rows[0].guaranteed).toBe(3)
+    expect(rows[0].luckiest).toBe(12)
+    expect(rows[0].unluckiest).toBe(89)
+  })
+
+  test('排除池带标记且不参与统计', () => {
+    const rows = buildWaiwaiRows(pools, { yes: '是', no: '否', excludedSuffix: '（不参与统计）' })
+    expect(rows[1].pool).toBe('常驻跃迁（不参与统计）')
+    expect(rows[1].included).toBe('否')
+    expect(rows[1].unknown).toBe(5)
+  })
+
+  test('缺少统计字段时补零，不抛错', () => {
+    const rows = buildWaiwaiRows([{ name: 'X', excluded: false, stats: {} }])
+    expect(rows[0].total).toBe(0)
+    expect(rows[0].deviation1).toBe(0)
+    expect(rows[0].noDeviationRate).toBe(0)
   })
 })

@@ -6,6 +6,9 @@ const path = require('path')
 const i18n = require('./i18n')
 const config = require('./config')
 const { games, getGachaTypes, getGameInfo } = require('./games')
+const { getLocalBanners } = require('./gachaBanner')
+const { buildWaiwaiStats, buildWaiwaiRows } = require('./utils/waiwaiStats')
+const { addWaiwaiSheet } = require('./utils/excelWaiwai')
 
 function pad(num) {
   return `${num}`.padStart(2, "0");
@@ -22,8 +25,7 @@ function getTimeString() {
   return `${YYYY}${MM}${DD}_${HH}${mm}${ss}`;
 }
 
-const addRawSheet = (workbook, data) => {
-  const sheet = workbook.addWorksheet('rawData', {views: [{state: 'frozen', ySplit: 1}]})
+const addRawSheet = (workbook, data) => {  const sheet = workbook.addWorksheet('rawData', {views: [{state: 'frozen', ySplit: 1}]})
   const excelKeys = ['gacha_id', 'gacha_type', 'id', 'item_id', 'item_type', 'lang', 'name', 'rank_type', 'time', 'uid']
   sheet.columns = excelKeys.map((key, index) => {
     return {
@@ -50,6 +52,8 @@ const addRawSheet = (workbook, data) => {
   }
   sheet.addRows(temp)
 }
+
+// 歪率分析工作表：见 utils/excelWaiwai.js
 
 const start = async () => {
   const g = games[config.game]
@@ -151,6 +155,23 @@ const start = async () => {
         }
       })
     })
+  }
+
+  // 歪率分析工作表（统计失败不影响其它工作表）
+  try {
+    const banners = await getLocalBanners(config.game)
+    const waiwai = buildWaiwaiStats({ game: config.game, result: data.result, banners, types: typeList })
+    if (waiwai.pools.length) {
+      const w = i18n.excel.waiwai
+      const rows = buildWaiwaiRows(waiwai.pools, {
+        yes: w.yes,
+        no: w.no,
+        excludedSuffix: w.excludedSuffix
+      })
+      addWaiwaiSheet(workbook, rows, w, customFont)
+    }
+  } catch (e) {
+    console.error('add waiwai sheet failed', e)
   }
 
   addRawSheet(workbook, data)
