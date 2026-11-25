@@ -23,6 +23,10 @@
         <el-button type="primary" plain @click="state.showDataDialog = true">{{common.dataManage}}</el-button>
         <p class="text-gray-400 text-xs m-1.5">{{text.dataManagerHint}}</p>
       </el-form-item>
+      <el-form-item :label="text.bannerData">
+        <el-button type="primary" plain @click="state.showBannerDialog = true">{{text.bannerManage}}</el-button>
+        <p class="text-gray-400 text-xs m-1.5">{{text.bannerHint}}</p>
+      </el-form-item>
       <el-form-item :label="text.autoUpdate">
         <el-switch
           @change="saveSetting"
@@ -95,6 +99,9 @@
         </el-table>
       </div>
     </el-dialog>
+    <el-dialog v-model="state.showBannerDialog" :title="banner.text.title" width="92%">
+      <banner-manager :i18n="i18n" :game-info="gameInfo"></banner-manager>
+    </el-dialog>
   </div>
 
 </template>
@@ -102,6 +109,7 @@
 <script setup>
 const { ipcRenderer, shell } = require('electron')
 import { reactive, onMounted, computed } from 'vue'
+import BannerManager from './BannerManager.vue'
 
 const emit = defineEmits(['close', 'changeLang', 'refreshData'])
 
@@ -127,12 +135,14 @@ const settingForm = reactive({
 
 const state = reactive({
   showDataDialog: false,
+  showBannerDialog: false,
   dataActionLoading: false
 })
 
 const common = computed(() => props.i18n.ui.common)
 const text = computed(() => props.i18n.ui.setting)
 const about = computed(() => props.i18n.ui.about)
+const banner = computed(() => props.i18n.ui.banner || {})
 const gameInfo = computed(() => props.gameInfo)
 
 // 时间格式化：无有效时间时显示 '-'

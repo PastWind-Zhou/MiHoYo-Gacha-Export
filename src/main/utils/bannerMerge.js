@@ -52,6 +52,10 @@ const mergeBanners = (base, incoming, options = {}) => {
   const incomingUsed = new Array(incoming.length).fill(false)
   let added = 0
   let updated = 0
+  // 增量变更列表：只包含「新增」与「被修正」的卡池
+  // 覆盖层只应保存增量，否则会把内置基线整份复制进去，
+  // 导致内置数据后续更新被旧覆盖层压住。
+  const changes = []
 
   // 按 (channel,end) 分组
   const groupOf = (arr, keyFn) => {
@@ -94,7 +98,6 @@ const mergeBanners = (base, incoming, options = {}) => {
         const takenUp = takeUpOf(result[bi], incoming[matched])
         const upChanged = upSetKey({ up: takenUp }) !== upSetKey(result[bi])
         const eChanged = overrideTime && endChanged(result[bi].end, incoming[matched].end)
-        if (upChanged || eChanged) updated++
         result[bi] = {
           ...result[bi],
           end: eChanged ? incoming[matched].end : result[bi].end,
@@ -109,6 +112,10 @@ const mergeBanners = (base, incoming, options = {}) => {
                 }
               }
             : {})
+        }
+        if (upChanged || eChanged) {
+          updated++
+          changes.push(result[bi])
         }
       } else {
         remainingI.push(bi)
@@ -125,7 +132,6 @@ const mergeBanners = (base, incoming, options = {}) => {
       const takenUp = takeUpOf(result[bi], incoming[ii])
       const upChanged = upSetKey({ up: takenUp }) !== upSetKey(result[bi])
       const eChanged = overrideTime && endChanged(result[bi].end, incoming[ii].end)
-      if (upChanged || eChanged) updated++
       // 保留 base 的 start；end 仅在日期变化时更新；up 依合并策略决定
       result[bi] = {
         ...result[bi],
@@ -142,18 +148,24 @@ const mergeBanners = (base, incoming, options = {}) => {
             }
           : {})
       }
+      if (upChanged || eChanged) {
+        updated++
+        changes.push(result[bi])
+      }
     }
   }
 
   // 4. incoming 中没配上的 → 新卡池
   for (let i = 0; i < incoming.length; i++) {
     if (incomingUsed[i]) continue
-    result.push(cloneBanner(incoming[i]))
+    const item = cloneBanner(incoming[i])
+    result.push(item)
+    changes.push(item)
     added++
   }
 
   result.sort((a, b) => (parseLocal(a.start) || 0) - (parseLocal(b.start) || 0))
-  return { banners: result, added, updated }
+  return { banners: result, added, updated, changes }
 }
 
 module.exports = { bannerKey, upSetKey, endChanged, mergeBanners }

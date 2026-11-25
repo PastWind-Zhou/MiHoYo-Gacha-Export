@@ -13,7 +13,14 @@ const config = {
   fetchFullHistory: false,
   hideNovice: false,
   hideStandard: false,
-  readableJSON: false
+  readableJSON: false,
+  // 卡池数据远程源设置（方案 §2.4）
+  bannerSourceUrl: '',
+  bannerSourceInterval: 24,
+  bannerSourceTimeout: 30,
+  bannerSourceRetry: 1,
+  bannerAutoSync: false,
+  bannerLastSync: 0
 }
 
 const getLocalConfig = async () => {

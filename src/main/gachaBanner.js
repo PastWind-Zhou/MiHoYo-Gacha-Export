@@ -63,7 +63,9 @@ const {
 // ---------- 规范化 ----------
 // 统一为内部结构：{ version, phase, channel, title, start, end, up: [], up4: [], upByType? }
 // 扩展字段（缺省不影响，方案 §2.5）：source / confidence / upIds / needsManual / candidates
-const normalizeBanner = (b) => ({
+// defaultSource：该批数据的来源标记（内置 builtin / 手动 manual / 远程 remote），
+// banner 自带 source 时以其为准
+const normalizeBanner = (b, defaultSource = 'builtin') => ({
   version: String(b.version || ''),
   phase: String(b.phase || ''),
   channel: String(b.channel || ''),
@@ -73,7 +75,7 @@ const normalizeBanner = (b) => ({
   up: (b.up || []).map((x) => String(x).trim()).filter(Boolean),
   up4: (b.up4 || []).map((x) => String(x).trim()).filter(Boolean),
   // 数据来源：builtin 内置基线 / local 本地反推 / manual 手动修正 / remote 远程拉取
-  source: String(b.source || 'builtin'),
+  source: String(b.source || defaultSource),
   // 反推置信度：high 唯一最高级物品 / low 待人工确认
   confidence: b.confidence ? String(b.confidence) : '',
   // UP 物品的 item_id（可选，便于按 ID 匹配）
@@ -92,8 +94,8 @@ const normalizeBanner = (b) => ({
     : {})
 })
 
-const normalizeSet = (set) => {
-  const banners = (set && Array.isArray(set.banners) ? set.banners : []).map(normalizeBanner)
+const normalizeSet = (set, defaultSource = 'builtin') => {
+  const banners = (set && Array.isArray(set.banners) ? set.banners : []).map((b) => normalizeBanner(b, defaultSource))
   return {
     source: (set && set.source) || '',
     timezone: (set && set.timezone) || 'UTC+8',
@@ -107,10 +109,12 @@ const normalizeSet = (set) => {
 const { mergeBanners, bannerKey } = require('./utils/bannerMerge')
 
 // ---------- 本地覆盖层 ----------
+// 覆盖层里的每条数据都带有自己的 source（manual 手动修正 / remote 远程拉取），
+// 旧文件没有 source 时按手动处理
 const getOverride = async (game) => {
   const p = path.join(OVERRIDE_DIR, `${game}.json`)
   const data = await readJSONSafe(p)
-  return data ? normalizeSet(data) : null
+  return data ? normalizeSet(data, 'manual') : null
 }
 
 const saveOverride = async (game, set) => {
@@ -118,12 +122,44 @@ const saveOverride = async (game, set) => {
   await writeJSONSafe(p, set)
 }
 
+// 写入覆盖层条目（手动修正 / 外部导入共用）
+const saveBannerEntries = async (game, banners, meta = {}) => {
+  const current = await getOverride(game)
+  const set = {
+    source: meta.source || 'manual',
+    timezone: 'UTC+8',
+    updated: new Date().toISOString().slice(0, 10),
+    note: meta.note || '',
+    banners: [...(current?.banners || []), ...banners]
+  }
+  await saveOverride(game, set)
+  return set
+}
+
+// 清除覆盖层中来自远程的数据（保留手动修正）
+const clearRemoteBanners = async (game) => {
+  const current = await getOverride(game)
+  if (!current || !current.banners.length) return { removed: 0, total: 0 }
+  const kept = current.banners.filter((b) => b.source !== 'remote')
+  const removed = current.banners.length - kept.length
+  if (removed > 0) {
+    await saveOverride(game, {
+      source: current.source || 'manual',
+      timezone: 'UTC+8',
+      updated: new Date().toISOString().slice(0, 10),
+      note: current.note || '',
+      banners: kept
+    })
+  }
+  return { removed, total: kept.length }
+}
+
 // ---------- 本地反推层（第②层） ----------
 // 与手动/远程覆盖层分开存放，避免两者互相覆盖
 const getLocalInferred = async (game) => {
   const p = path.join(OVERRIDE_DIR, `${game}.local.json`)
   const data = await readJSONSafe(p)
-  return data ? normalizeSet(data) : null
+  return data ? normalizeSet(data, 'local') : null
 }
 
 const saveLocalInferred = async (game, set) => {
@@ -204,15 +240,35 @@ const needSync = (banners, now = Date.now()) => {
 }
 
 // ---------- 远程拉取 ----------
-const fetchRemoteJSON = async (url) => {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'MiHoYoGachaExport/1.0.1' },
-    timeout: 30000
-  })
-  if (!res.ok) throw new Error('HTTP ' + res.status)
-  const text = await res.text()
-  if (text.length > MAX_REMOTE_BYTES) throw new Error('response too large')
-  return JSON.parse(text)
+// 安全约束（方案 §2.4）：
+//   只发 GET、不携带任何凭证；响应体积上限 8MB；JSON 结构校验失败即忽略
+const fetchRemoteJSON = async (url, options = {}) => {
+  // 只允许 http/https，避免 file:// 之类读取本地文件
+  if (!/^https?:\/\//i.test(String(url || ''))) {
+    throw new Error('invalid url protocol')
+  }
+  const timeout = Math.max(1, Number(options.timeout) || 30) * 1000
+  const retry = Math.max(0, Number(options.retry) || 0)
+  let lastError = null
+  for (let attempt = 0; attempt <= retry; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { 'User-Agent': 'MiHoYoGachaExport/1.0.1' },
+        timeout
+      })
+      if (!res.ok) throw new Error('HTTP ' + res.status)
+      const text = await res.text()
+      if (text.length > MAX_REMOTE_BYTES) throw new Error('response too large')
+      return JSON.parse(text)
+    } catch (e) {
+      lastError = e
+      if (attempt < retry) {
+        await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)))
+      }
+    }
+  }
+  throw lastError
 }
 
 // 从 Biligame wiki 拉取
@@ -222,10 +278,15 @@ const fetchFromWiki = async (game) => {
 }
 
 // 从自定义远程地址拉取（需返回 { banners: [...] } 结构）
-const fetchFromCustom = async (url) => {
-  const data = await fetchRemoteJSON(url)
+const fetchFromCustom = async (url, options = {}) => {
+  const data = await fetchRemoteJSON(url, options)
   if (!data || !Array.isArray(data.banners)) throw new Error('invalid remote format')
-  return normalizeSet(data)
+  const set = normalizeSet(data, 'remote')
+  // 远程数据统一标记来源，便于「清除远程数据」
+  set.banners.forEach((b) => {
+    if (!b.source || b.source === 'builtin') b.source = 'remote'
+  })
+  return set
 }
 
 // ---------- 一致性比对 ----------
@@ -245,6 +306,14 @@ const sameBannerSet = (a, b) => {
 }
 
 // ---------- 对外主接口 ----------
+// 标记远程来源（便于「清除远程数据」按来源过滤）
+const markRemoteBanners = (set) => {
+  set.banners.forEach((b) => {
+    if (!b.source || b.source === 'builtin') b.source = 'remote'
+  })
+  return set
+}
+
 // 检查并按需同步某游戏的卡池数据
 //
 // 流程（按需求）：
@@ -277,12 +346,12 @@ const syncBanners = async (game, options = {}) => {
   const attempts = []
   try {
     if (options.customUrl) {
-      incoming = await fetchFromCustom(options.customUrl)
+      incoming = await fetchFromCustom(options.customUrl, { timeout: options.timeout, retry: options.retry })
       from = options.customUrl
       attempts.push({ source: from, ok: true })
     } else {
       const r = await require('./module/bannerSource').fetchBanners(game)
-      incoming = normalizeSet(r.data)
+      incoming = markRemoteBanners(normalizeSet(r.data, 'remote'))
       from = r.source
       attempts.push(...(r.attempts || []))
     }
@@ -292,7 +361,7 @@ const syncBanners = async (game, options = {}) => {
     if (options.customUrl) {
       try {
         const r = await require('./module/bannerSource').fetchBanners(game)
-        incoming = normalizeSet(r.data)
+        incoming = markRemoteBanners(normalizeSet(r.data, 'remote'))
         from = r.source + '(fallback)'
         attempts.push(...(r.attempts || []))
       } catch (e2) {
@@ -330,6 +399,26 @@ const syncBanners = async (game, options = {}) => {
   // 合并始终以本地为基底、只补入本地没有的卡池，
   // 因此米游社源（仅当期）不会覆盖或丢失本地历史数据。
   const merged = mergeBanners(local.banners, incoming.banners)
+  // 覆盖层只保存增量（新增 / 被修正），不复制整份内置基线，
+  // 否则内置数据后续更新会被旧覆盖层压住。
+  if (!merged.changes.length) {
+    return {
+      game,
+      action: 'unchanged',
+      reason: 'no-change',
+      message: `卡池数据无变化（共 ${local.banners.length} 期），未写入覆盖层`,
+      total: local.banners.length,
+      maxEnd: decision.coverage ? decision.coverage.maxEndText : '',
+      source: from
+    }
+  }
+
+  // 保留已有的手动修正（手动优先于远程）
+  const current = await getOverride(game)
+  const manualEntries = (current?.banners || []).filter((b) => b.source === 'manual')
+  const manualKeys = new Set(manualEntries.map((b) => `${b.channel}@${b.start}`))
+  const remoteChanges = merged.changes.filter((b) => !manualKeys.has(`${b.channel}@${b.start}`))
+
   const partial = from === 'mihoyo-wiki'
   const set = {
     source: from,
@@ -338,7 +427,7 @@ const syncBanners = async (game, options = {}) => {
     note: partial
       ? `由 MiHoYoGachaExport 同步自 ${from}（仅当期卡池，历史沿用本地）`
       : '由 MiHoYoGachaExport 同步自 ' + from,
-    banners: merged.banners
+    banners: [...manualEntries, ...remoteChanges]
   }
   await saveOverride(game, set)
 
@@ -414,6 +503,9 @@ module.exports = {
   getLocalBanners,
   getOverride,
   saveOverride,
+  saveBannerEntries,
+  clearRemoteBanners,
+  markRemoteBanners,
   getLocalInferred,
   saveLocalInferred,
   inferLocalBanners,

@@ -284,6 +284,7 @@ const changeGame = async (gameId) => {
   await getI18nData()
   await updateConfig()
   await loadWaiwai()
+  ipcRenderer.invoke('MAYBE_SYNC_BANNERS').catch(() => {})
 }
 
 const getI18nData = async () => {
@@ -389,6 +390,8 @@ const showSetting = (show) => {
   } else {
     state.showSetting = false
     updateConfig()
+    // 设置页可能修改了卡池排期，关闭时刷新歪率分析
+    loadWaiwai()
   }
 }
 
@@ -460,5 +463,8 @@ onMounted(async () => {
   ipcRenderer.on('AUTHKEY_TIMEOUT', (event, message) => {
     state.authkeyTimeout = message
   })
+
+  // 按设置中的间隔自动同步卡池数据（失败不影响其它功能）
+  ipcRenderer.invoke('MAYBE_SYNC_BANNERS').catch(() => {})
 })
 </script>
