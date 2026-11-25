@@ -101,5 +101,20 @@
   "ui.button.copyApiUrl": "Copy API URL",
   "ui.extra.apiUrlCopied": "API URL copied",
   "uigf.fileType": "UIGF v4.0, v4.1",
-  "ui.setting.idVersion": "ID database version"
+  "ui.setting.idVersion": "ID database version",
+  "ui.tab.stats": "Gacha Stats",
+  "ui.tab.waiwai": "Deviation Analysis",
+  "ui.waiwai.noDeviation": "No-deviation rate",
+  "ui.waiwai.avgUp": "Avg pulls per UP",
+  "ui.waiwai.avgTop": "Avg pulls per 5-star",
+  "ui.waiwai.luckiest": "Luckiest",
+  "ui.waiwai.unluckiest": "Unluckiest",
+  "ui.waiwai.upHitRate": "UP hit rate",
+  "ui.waiwai.guaranteed": "Guaranteed",
+  "ui.waiwai.deviationDist": "Deviation distribution",
+  "ui.waiwai.deviationItem": "Lost x{n}",
+  "ui.waiwai.unknown": "records lack banner data and are excluded",
+  "ui.waiwai.excluded": "This pool is excluded from deviation stats",
+  "ui.waiwai.pulls": "pulls",
+  "ui.waiwai.noData": "No gacha data yet"
 }

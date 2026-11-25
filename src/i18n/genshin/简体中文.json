@@ -101,5 +101,20 @@
   "ui.button.copyApiUrl": "复制API链接",
   "ui.extra.apiUrlCopied": "API链接已复制",
   "uigf.fileType": "统一可交换抽卡记录标准 v4.0, v4.1",
-  "ui.setting.idVersion": "ID 数据库版本"
+  "ui.setting.idVersion": "ID 数据库版本",
+  "ui.tab.stats": "抽卡统计",
+  "ui.tab.waiwai": "歪率分析",
+  "ui.waiwai.noDeviation": "不歪率",
+  "ui.waiwai.avgUp": "平均UP抽数",
+  "ui.waiwai.avgTop": "平均5星抽数",
+  "ui.waiwai.luckiest": "最欧",
+  "ui.waiwai.unluckiest": "最非",
+  "ui.waiwai.upHitRate": "UP命中率",
+  "ui.waiwai.guaranteed": "大保底次数",
+  "ui.waiwai.deviationDist": "歪值分布",
+  "ui.waiwai.deviationItem": "歪{n}次",
+  "ui.waiwai.unknown": "条记录缺少卡池数据，未参与统计",
+  "ui.waiwai.excluded": "该池不参与歪率统计",
+  "ui.waiwai.pulls": "抽",
+  "ui.waiwai.noData": "暂无抽卡数据"
 }

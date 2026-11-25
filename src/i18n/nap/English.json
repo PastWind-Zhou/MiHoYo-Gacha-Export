@@ -116,5 +116,20 @@
   "ui.data.weapon5": "S-Rank W-Engines",
   "ui.data.bang5": "S-Rank Bangboo",
   "ui.data.no5star": "pulls without a S-Rank",
-  "ui.data.bang2": "B-Rank Bangboo"
+  "ui.data.bang2": "B-Rank Bangboo",
+  "ui.tab.stats": "Gacha Stats",
+  "ui.tab.waiwai": "Deviation Analysis",
+  "ui.waiwai.noDeviation": "No-deviation rate",
+  "ui.waiwai.avgUp": "Avg pulls per UP",
+  "ui.waiwai.avgTop": "Avg pulls per S-rank",
+  "ui.waiwai.luckiest": "Luckiest",
+  "ui.waiwai.unluckiest": "Unluckiest",
+  "ui.waiwai.upHitRate": "UP hit rate",
+  "ui.waiwai.guaranteed": "Guaranteed",
+  "ui.waiwai.deviationDist": "Deviation distribution",
+  "ui.waiwai.deviationItem": "Lost x{n}",
+  "ui.waiwai.unknown": "records lack banner data and are excluded",
+  "ui.waiwai.excluded": "This pool is excluded from deviation stats",
+  "ui.waiwai.pulls": "pulls",
+  "ui.waiwai.noData": "No gacha data yet"
 }

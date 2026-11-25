@@ -50,15 +50,22 @@
       </div>
     </div>
     <p class="text-gray-400 my-2 text-xs">{{hint}}<el-button @click="(state.showCacheCleanDlg=true)" v-if="state.authkeyTimeout" style="margin-left: 8px;" size="small" plain round>{{ui.button.solution}}</el-button></p>
-    <div v-if="detail" class="gap-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 2xl:grid-cols-4">
-      <div class="mb-4" v-for="(item, i) of detail" :key="i">
-        <div :class="{hidden: hidePool(item[0])}">
-          <p class="text-center text-gray-600 my-2">{{typeMap.get(item[0])}}</p>
-          <pie-chart :data="item" :i18n="state.i18n" :typeMap="typeMap" :gameInfo="state.gameInfo"></pie-chart>
-          <gacha-detail :i18n="state.i18n" :data="item" :typeMap="typeMap" :gameInfo="state.gameInfo"></gacha-detail>
+    <el-tabs v-model="state.tab" class="mb-2">
+      <el-tab-pane :label="ui.tab.stats" name="stats">
+        <div v-if="detail" class="gap-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 2xl:grid-cols-4">
+          <div class="mb-4" v-for="(item, i) of detail" :key="i">
+            <div :class="{hidden: hidePool(item[0])}">
+              <p class="text-center text-gray-600 my-2">{{typeMap.get(item[0])}}</p>
+              <pie-chart :data="item" :i18n="state.i18n" :typeMap="typeMap" :gameInfo="state.gameInfo"></pie-chart>
+              <gacha-detail :i18n="state.i18n" :data="item" :typeMap="typeMap" :gameInfo="state.gameInfo"></gacha-detail>
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
+      </el-tab-pane>
+      <el-tab-pane :label="ui.tab.waiwai" name="waiwai">
+        <waiwai-panel :stats="state.waiwaiStats" :i18n="state.i18n"></waiwai-panel>
+      </el-tab-pane>
+    </el-tabs>
     <Setting v-show="state.showSetting" :i18n="state.i18n" :gacha-data-info="dataInfo" :game-info="state.gameInfo" @refreshData="readData()" @changeLang="getI18nData()" @close="showSetting(false)"></Setting>
 
     <el-dialog :title="ui.urlDialog.title" v-model="state.showUrlDlg" width="90%" class="max-w-md">
@@ -93,6 +100,7 @@ import { reactive, computed, watch, onMounted } from 'vue'
 import PieChart from './components/PieChart.vue'
 import GachaDetail from './components/GachaDetail.vue'
 import Setting from './components/Setting.vue'
+import WaiwaiPanel from './components/WaiwaiPanel.vue'
 import gachaDetail from './gachaDetail'
 import { version } from '../../package.json'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -111,7 +119,9 @@ const state = reactive({
   showCacheCleanDlg: false,
   urlInput: '',
   authkeyTimeout: false,
-  config: {}
+  config: {},
+  tab: 'stats',
+  waiwaiStats: null
 })
 
 const gameOptions = computed(() => {
@@ -234,6 +244,7 @@ const fetchData = async (url) => {
   if (data) {
     applyData(data)
     state.status = 'loaded'
+    await loadWaiwai()
   } else {
     state.status = 'failed'
   }
@@ -246,7 +257,14 @@ const readData = async (force = false) => {
     if (data.dataMap.get(data.current)) {
       state.status = 'loaded'
     }
+    await loadWaiwai()
   }
+}
+
+// 拉取歪率分析数据（独立标签页）
+const loadWaiwai = async () => {
+  const data = await ipcRenderer.invoke('GET_WAIWAI_STATS')
+  state.waiwaiStats = data
 }
 
 const changeGame = async (gameId) => {
@@ -259,6 +277,7 @@ const changeGame = async (gameId) => {
   }
   await getI18nData()
   await updateConfig()
+  await loadWaiwai()
 }
 
 const getI18nData = async () => {
@@ -313,6 +332,7 @@ const importData = async () => {
   if (data) {
     applyData(data)
     state.status = 'loaded'
+    await loadWaiwai()
   } else {
     state.status = 'failed'
   }

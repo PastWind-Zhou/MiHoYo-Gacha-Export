@@ -116,5 +116,20 @@
   "ui.data.weapon5": "S级音擎",
   "ui.data.bang5": "S级邦布",
   "ui.data.no5star": "抽未出S级",
-  "ui.data.bang2": "B级邦布"
+  "ui.data.bang2": "B级邦布",
+  "ui.tab.stats": "抽卡统计",
+  "ui.tab.waiwai": "歪率分析",
+  "ui.waiwai.noDeviation": "不歪率",
+  "ui.waiwai.avgUp": "平均UP抽数",
+  "ui.waiwai.avgTop": "平均S级抽数",
+  "ui.waiwai.luckiest": "最欧",
+  "ui.waiwai.unluckiest": "最非",
+  "ui.waiwai.upHitRate": "UP命中率",
+  "ui.waiwai.guaranteed": "大保底次数",
+  "ui.waiwai.deviationDist": "歪值分布",
+  "ui.waiwai.deviationItem": "歪{n}次",
+  "ui.waiwai.unknown": "条记录缺少卡池数据，未参与统计",
+  "ui.waiwai.excluded": "该池不参与歪率统计",
+  "ui.waiwai.pulls": "抽",
+  "ui.waiwai.noData": "暂无抽卡数据"
 }
