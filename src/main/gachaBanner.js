@@ -62,6 +62,7 @@ const {
 
 // ---------- 规范化 ----------
 // 统一为内部结构：{ version, phase, channel, title, start, end, up: [], up4: [], upByType? }
+// 扩展字段（缺省不影响，方案 §2.5）：source / confidence / upIds / needsManual / candidates
 const normalizeBanner = (b) => ({
   version: String(b.version || ''),
   phase: String(b.phase || ''),
@@ -71,6 +72,15 @@ const normalizeBanner = (b) => ({
   end: String(b.end || ''),
   up: (b.up || []).map((x) => String(x).trim()).filter(Boolean),
   up4: (b.up4 || []).map((x) => String(x).trim()).filter(Boolean),
+  // 数据来源：builtin 内置基线 / local 本地反推 / manual 手动修正 / remote 远程拉取
+  source: String(b.source || 'builtin'),
+  // 反推置信度：high 唯一最高级物品 / low 待人工确认
+  confidence: b.confidence ? String(b.confidence) : '',
+  // UP 物品的 item_id（可选，便于按 ID 匹配）
+  upIds: (b.upIds || []).map((x) => String(x)).filter(Boolean),
+  // 待人工确认的期次（反推时出现多种最高级物品）
+  needsManual: !!b.needsManual,
+  candidates: (b.candidates || []).map((x) => String(x).trim()).filter(Boolean),
   // 混合池（角色+武器分开列 UP 名单）
   ...(b.upByType
     ? {
@@ -93,136 +103,8 @@ const normalizeSet = (set) => {
   }
 }
 
-// ---------- 合并 ----------
-// 同一 (channel, 结束时间) 下可能存在多个并行卡池（游戏会同期开放两个角色池），
-// 因此不能简单用 channel@end 做唯一键，否则并行池会互相覆盖导致数据丢失。
-// 这里采用「分组 + 贪心配对」：
-//   1. 按 (channel, 结束日期) 把 base 与 incoming 分组
-//      —— 只精确到日期：不同数据源的结束时间可能有秒级差异
-//         （内置用 14:59:59，wiki 用 14:59:00），精确到秒会导致完全配不上
-//   2. 组内先按 UP 名单集合精确配对（同一卡池 → incoming 的 UP 更权威）
-//   3. 组内剩余的按顺序配对（UP 被修正的情况）
-//   4. incoming 中没配上的 → 新卡池，追加
-//   5. base 中没配上的 → 保留不动
-// 合并时保留 base 的 start（上游按「版本更新或上一期结束时间推定」，比远端推定更准）。
-// end 仅在「日期」发生变化时才更新（真正的排期修正）；秒级差异忽略。
-const bannerKey = (b) => `${b.channel}@${String(b.end || '').slice(0, 10)}`
-const upSetKey = (b) => (b.up || []).slice().sort().join('|')
-
-// 结束时间是否发生了实质变化（日期不同才算）
-const endChanged = (a, b) => String(a || '').slice(0, 10) !== String(b || '').slice(0, 10)
-
-const mergeBanners = (base, incoming) => {
-  const cloneBanner = (b) => ({
-    ...b,
-    up: [...(b.up || [])],
-    up4: [...(b.up4 || [])],
-    ...(b.upByType
-      ? { upByType: { character: [...(b.upByType.character || [])], weapon: [...(b.upByType.weapon || [])] } }
-      : {})
-  })
-  const result = base.map(cloneBanner)
-  const baseUsed = new Array(result.length).fill(false)
-  const incomingUsed = new Array(incoming.length).fill(false)
-  let added = 0
-  let updated = 0
-
-  // 按 (channel,end) 分组
-  const groupOf = (arr, keyFn) => {
-    const m = new Map()
-    arr.forEach((x, i) => {
-      const k = keyFn(x)
-      if (!m.has(k)) m.set(k, [])
-      m.get(k).push(i)
-    })
-    return m
-  }
-  const baseGroups = groupOf(result, bannerKey)
-  const inGroups = groupOf(incoming, bannerKey)
-
-  for (const [slot, bIdx] of baseGroups) {
-    const iIdx = inGroups.get(slot) || []
-    if (!iIdx.length) continue
-
-    // 2. UP 名单精确配对
-    const iByUp = new Map()
-    for (const i of iIdx) {
-      const k = upSetKey(incoming[i])
-      if (!iByUp.has(k)) iByUp.set(k, [])
-      iByUp.get(k).push(i)
-    }
-    const remainingI = []
-    for (const bi of bIdx) {
-      const k = upSetKey(result[bi])
-      const pool = iByUp.get(k)
-      let matched = -1
-      if (pool) {
-        while (pool.length) {
-          const cand = pool.shift()
-          if (!incomingUsed[cand]) { matched = cand; break }
-        }
-      }
-      if (matched >= 0) {
-        baseUsed[bi] = true
-        incomingUsed[matched] = true
-        const upChanged = upSetKey(result[bi]) !== upSetKey(incoming[matched])
-        const eChanged = endChanged(result[bi].end, incoming[matched].end)
-        if (upChanged || eChanged) updated++
-        result[bi] = {
-          ...result[bi],
-          end: eChanged ? incoming[matched].end : result[bi].end,
-          up: [...(incoming[matched].up || [])],
-          ...(incoming[matched].upByType
-            ? {
-                upByType: {
-                  character: [...(incoming[matched].upByType.character || [])],
-                  weapon: [...(incoming[matched].upByType.weapon || [])]
-                }
-              }
-            : {})
-        }
-      } else {
-        remainingI.push(bi)
-      }
-    }
-
-    // 3. 剩余按顺序配对
-    const freeI = iIdx.filter((i) => !incomingUsed[i])
-    for (let k = 0; k < remainingI.length && k < freeI.length; k++) {
-      const bi = remainingI[k]
-      const ii = freeI[k]
-      baseUsed[bi] = true
-      incomingUsed[ii] = true
-      const upChanged = upSetKey(result[bi]) !== upSetKey(incoming[ii])
-      const eChanged = endChanged(result[bi].end, incoming[ii].end)
-      if (upChanged || eChanged) updated++
-      // 保留 base 的 start；end 仅在日期变化时更新；up 以 incoming 为准
-      result[bi] = {
-        ...result[bi],
-        end: eChanged ? incoming[ii].end : result[bi].end,
-        up: [...(incoming[ii].up || [])],
-        ...(incoming[ii].upByType
-          ? {
-              upByType: {
-                character: [...(incoming[ii].upByType.character || [])],
-                weapon: [...(incoming[ii].upByType.weapon || [])]
-              }
-            }
-          : {})
-      }
-    }
-  }
-
-  // 4. incoming 中没配上的 → 新卡池
-  for (let i = 0; i < incoming.length; i++) {
-    if (incomingUsed[i]) continue
-    result.push(cloneBanner(incoming[i]))
-    added++
-  }
-
-  result.sort((a, b) => (parseLocal(a.start) || 0) - (parseLocal(b.start) || 0))
-  return { banners: result, added, updated }
-}
+// ---------- 合并（纯逻辑见 utils/bannerMerge.js） ----------
+const { mergeBanners, bannerKey } = require('./utils/bannerMerge')
 
 // ---------- 本地覆盖层 ----------
 const getOverride = async (game) => {
@@ -236,10 +118,27 @@ const saveOverride = async (game, set) => {
   await writeJSONSafe(p, set)
 }
 
+// ---------- 本地反推层（第②层） ----------
+// 与手动/远程覆盖层分开存放，避免两者互相覆盖
+const getLocalInferred = async (game) => {
+  const p = path.join(OVERRIDE_DIR, `${game}.local.json`)
+  const data = await readJSONSafe(p)
+  return data ? normalizeSet(data) : null
+}
+
+const saveLocalInferred = async (game, set) => {
+  const p = path.join(OVERRIDE_DIR, `${game}.local.json`)
+  await writeJSONSafe(p, set)
+}
+
 // ---------- 集录祈愿开始时间补齐 ----------
 // 见 utils/bannerJudge.js（fillJiluStarts）
 
-// ---------- 合并内置 + 覆盖层 ----------
+// ---------- 合并内置 + 本地反推 + 覆盖层 ----------
+// 三层优先级（方案 §2.1）：
+//   第①层 内置基线      src/gachaBanner/<game>.json     随包分发，最权威
+//   第②层 本地反推      userData/gachaBanner/<game>.local.json  只补空白，不覆盖内置
+//   第③层 手动/远程覆盖 userData/gachaBanner/<game>.json       UP 以覆盖层为准
 const getLocalBanners = async (game) => {
   const builtin = normalizeSet(builtinBanners[game])
   // 原神额外合并「集录祈愿」内置数据（独立 channel，与主源不冲突）
@@ -248,11 +147,18 @@ const getLocalBanners = async (game) => {
     ? mergeBanners(builtin.banners, extra.banners).banners
     : builtin.banners
 
+  // 第②层：本地反推（不覆盖内置已有 UP 与时间）
+  const inferred = await getLocalInferred(game)
+  const withInferred = inferred && inferred.banners.length
+    ? mergeBanners(builtinAll, inferred.banners, { overrideUp: false, overrideTime: false, fillEmptyUp: true }).banners
+    : builtinAll
+
+  // 第③层：手动 / 远程覆盖（UP 以覆盖层为准）
   const override = await getOverride(game)
   if (!override || !override.banners.length) {
-    return { ...builtin, banners: fillJiluStarts(builtinAll) }
+    return { ...builtin, banners: fillJiluStarts(withInferred) }
   }
-  const merged = mergeBanners(builtinAll, override.banners)
+  const merged = mergeBanners(withInferred, override.banners)
   return {
     source: override.source || builtin.source,
     timezone: 'UTC+8',
@@ -452,10 +358,36 @@ const syncBanners = async (game, options = {}) => {
   }
 }
 
-// 获取用于判定的本地卡池数据（内置 + 覆盖层）
+// 获取用于判定的本地卡池数据（内置 + 反推 + 覆盖层）
 const getBanners = async (game) => {
   const local = await getLocalBanners(game)
   return local.banners
+}
+
+// ---------- 本地反推（运行时） ----------
+// 用本地抽卡记录反推缺失排期的卡池，并持久化到第②层（不改内置基线）
+// pools: [{ poolKey, records }]
+// 返回 { inferred, pending, saved }
+//   inferred —— 唯一最高级物品，置信度高，可直接参与判定
+//   pending  —— 出现多种最高级物品，置信度低，需人工确认（UP 名单为空，不参与判定）
+const inferLocalBanners = async (game, pools = []) => {
+  const { inferGame } = require('./utils/bannerInfer')
+  const local = await getLocalBanners(game)
+  const { inferred, pending } = inferGame({ game, pools, banners: local.banners })
+  const existing = (await getLocalInferred(game))?.banners || []
+  const merged = existing.length
+    ? mergeBanners(existing, [...inferred, ...pending]).banners
+    : [...inferred, ...pending]
+  if (merged.length) {
+    await saveLocalInferred(game, {
+      source: 'local-inferred',
+      timezone: 'UTC+8',
+      updated: new Date().toISOString().slice(0, 10),
+      note: '由本地抽卡记录反推生成；低置信度期次需人工确认',
+      banners: merged
+    })
+  }
+  return { inferred, pending, saved: merged.length }
 }
 
 // 查询某时刻某 channel 开放的卡池、判断某物品是否为当期 UP：
@@ -482,6 +414,9 @@ module.exports = {
   getLocalBanners,
   getOverride,
   saveOverride,
+  getLocalInferred,
+  saveLocalInferred,
+  inferLocalBanners,
   syncBanners,
   needSync,
   getCoverage,

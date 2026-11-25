@@ -48,10 +48,14 @@ const bannersAt = (banners, channel, timeMs) => {
 
 // 判断某物品在某时刻是否为当期 UP
 // 返回 { up, known }：known=false 表示该时刻没有卡池数据，无法判定
+//
+// 空 UP 名单的卡池（本地反推出的「待人工确认」条目）不参与判定：
+// 否则会把「不可判定」误判成「歪」。
 const isUpAt = (banners, channel, name, timeMs, itemType) => {
   const active = bannersAt(banners, channel, timeMs)
   if (!active.length) return { up: false, known: false }
   const keys = nameKeys(name)
+  let hasUsable = false
   for (const b of active) {
     // 混合池（原神集录祈愿）：角色与武器的 UP 名单分开，按记录类型取用
     let list = b.up || []
@@ -60,11 +64,14 @@ const isUpAt = (banners, channel, name, timeMs, itemType) => {
       if (/角色|代理/.test(t)) list = b.upByType.character || []
       else if (/武器|光锥|音擎/.test(t)) list = b.upByType.weapon || []
     }
+    if (!list.length) continue
+    hasUsable = true
     for (const u of list) {
       const uk = nameKeys(u)
       if (uk.some((x) => keys.some((y) => x === y))) return { up: true, known: true }
     }
   }
+  if (!hasUsable) return { up: false, known: false }
   return { up: false, known: true }
 }
 

@@ -1,21 +1,28 @@
 // 卡池判定覆盖率验证脚本（开发期工具，不参与打包）
 //
 // 用法：
-//   node tools/verify-banner-coverage.js [userData目录]
-//   node tools/verify-banner-coverage.js "D:\path\to\userData"
+//   node tools/verify-banner-coverage.js [userData目录] [--infer]
+//   node tools/verify-banner-coverage.js "D:\path\to\userData" --infer
 //
 // 作用：拿真实抽卡记录跑一遍判定引擎，输出每个卡池的
 //   记录总数 / 最高级物品数 / 可判定数 / 覆盖率 / UP 数 / 歪数 / 不可判定数
 // 用于验证「最高级记录 100% 可判定」这一验收标准，并定位无法判定的具体记录。
+//
+// --infer：额外跑一遍本地反推（方案 §2.1 第②层），把反推出的卡池并入后复算覆盖率，
+//          用于观察反推能补上多少缺失排期。
 const fs = require('fs')
 const path = require('path')
 
 const ROOT = path.resolve(__dirname, '..')
-const { analyzePool, fillJiluStarts } = require(path.join(ROOT, 'src/main/utils/bannerJudge'))
+const { analyzePool, fillJiluStarts, parseLocal } = require(path.join(ROOT, 'src/main/utils/bannerJudge'))
+const { inferGame } = require(path.join(ROOT, 'src/main/utils/bannerInfer'))
+const { mergeBanners } = require(path.join(ROOT, 'src/main/utils/bannerMerge'))
 const { games } = require(path.join(ROOT, 'src/main/games'))
 
-const DEFAULT_USER_DATA = 'D:\\软件\\抽卡分析\\MiHoYo\\build\\MiHoYoGachaExport-1.0.0\\userData'
-const userDataDir = process.argv[2] || DEFAULT_USER_DATA
+const args = process.argv.slice(2)
+const useInfer = args.includes('--infer')
+const useGap = args.includes('--gap')
+const userDataDir = args.find((a) => !a.startsWith('--')) || 'D:\\软件\\抽卡分析\\MiHoYo\\build\\MiHoYoGachaExport-1.0.0\\userData'
 
 const BANNER_FILES = {
   genshin: ['genshin.json', 'genshin-jilu.json'],
@@ -38,6 +45,7 @@ const loadBanners = (game) => {
         end: String(b.end || ''),
         up: (b.up || []).map((x) => String(x).trim()).filter(Boolean),
         up4: (b.up4 || []).map((x) => String(x).trim()).filter(Boolean),
+        source: String(b.source || 'builtin'),
         ...(b.upByType
           ? {
               upByType: {
@@ -92,12 +100,91 @@ const pad = (s, len) => {
 
 const pct = (a, b) => (b ? ((a / b) * 100).toFixed(1) + '%' : '-')
 
+const report = (game, banners, pools, { count = true } = {}) => {
+  let problems = 0
+  let suspicious = 0
+  for (const { poolKey, records } of pools) {
+    if (!records.length) continue
+    const { channel, topRank, excluded, marked, stats } = analyzePool({
+      game,
+      poolKey,
+      records,
+      banners,
+      topRank: games[game].ranks.top
+    })
+    const rate = pct(stats.knownCount, stats.topCount)
+    console.log(
+      `  池 ${pad(poolKey, 4)} ${pad(channel || '(无排期)', 12)} 记录 ${pad(stats.total, 6)} ` +
+      `最高级 ${pad(stats.topCount, 4)} 可判定 ${pad(stats.knownCount, 4)}(${rate}) ` +
+      `UP ${pad(stats.upCount, 4)} 歪 ${pad(stats.lostCount, 4)} 不可判定 ${pad(stats.unknownCount, 4)}` +
+      (excluded ? '  [不参与歪率统计]' : '') +
+      `  不歪率 ${(stats.noDeviationRate * 100).toFixed(2)}%` +
+      `  平均UP ${stats.avgUpPulls}抽 平均5星 ${stats.avgTopPulls}抽` +
+      `  最欧${stats.minTopPulls}/最非${stats.maxTopPulls}`
+    )
+    if (stats.unknownCount > 0 && !excluded) {
+      problems++
+      const samples = marked.filter((m) => m.top && !m.known).slice(0, 5)
+      samples.forEach((m) => {
+        console.log(`      ↳ 不可判定：${m.time}  ${m.name}  (${m.item_type})`)
+      })
+      if (stats.unknownCount > samples.length) {
+        console.log(`      ↳ …另有 ${stats.unknownCount - samples.length} 条不可判定记录`)
+      }
+    }
+    // 可判定但一个 UP 都没有：多半是池与排期的映射有问题（例如复刻池）
+    if (!excluded && stats.knownCount >= 3 && stats.upCount === 0) {
+      suspicious++
+      console.log(`      ⚠ 可判定 ${stats.knownCount} 条却无 UP，疑似池映射有误`)
+    }
+  }
+  return { problems, suspicious }
+}
+
+// 模拟「某期卡池缺 UP 名单」：
+// 在每个 channel 中挑一个「真实记录命中数最少」的期次，把它的 UP 名单置空，
+// 这样制造出孤立缺口，便于观察本地反推能否补回。
+const makeGap = (banners, channelRecords) => {
+  let changed = 0
+  const byChannel = new Map()
+  banners.forEach((b) => {
+    if (!byChannel.has(b.channel)) byChannel.set(b.channel, [])
+    byChannel.get(b.channel).push(b)
+  })
+  for (const [channel, list] of byChannel) {
+    const records = channelRecords.get(channel) || []
+    if (!records.length) continue
+    let best = null
+    let bestCount = Infinity
+    for (const b of list) {
+      const s = parseLocal(b.start)
+      const e = parseLocal(b.end)
+      if (!s || !e) continue
+      const hit = records.filter((r) => {
+        const t = parseLocal(r.time)
+        return t >= s && t <= e
+      }).length
+      if (hit > 0 && hit < bestCount) {
+        bestCount = hit
+        best = b
+      }
+    }
+    if (best) {
+      best.up = []
+      best.up4 = []
+      changed++
+    }
+  }
+  return changed
+}
+
 const run = () => {
   if (!fs.existsSync(userDataDir)) {
     console.error(`用户数据目录不存在：${userDataDir}`)
     process.exit(2)
   }
   console.log(`用户数据目录：${userDataDir}`)
+  console.log(useInfer ? '模式：内置基线 + 本地反推（--infer）' : '模式：仅内置基线')
   console.log('')
 
   let problems = 0
@@ -113,47 +200,55 @@ const run = () => {
       console.log(`==== ${games[game].id} ====  （无抽卡记录文件，跳过）`)
       continue
     }
-    const banners = loadBanners(game)
+    let banners = loadBanners(game)
+    const accounts = files.map((f) => loadAccount(path.join(dir, f)))
+    const pools = new Map()
+    accounts.forEach((account) => {
+      account.result.forEach((records, poolKey) => {
+        if (!pools.has(poolKey)) pools.set(poolKey, [])
+        pools.set(poolKey, pools.get(poolKey).concat(records))
+      })
+    })
+    const poolList = [...pools.entries()].map(([poolKey, records]) => ({ poolKey, records }))
+
     console.log(`==== ${games[game].id} ====  卡池 ${banners.length} 期`)
 
-    for (const file of files) {
-      const account = loadAccount(path.join(dir, file))
-      for (const [poolKey, records] of account.result) {
-        if (!records.length) continue
-        const { channel, topRank, excluded, marked, stats } = analyzePool({
-          game,
-          poolKey,
-          records,
-          banners,
-          topRank: games[game].ranks.top
+    if (useGap) {
+      // 按 channel 汇总最高级记录，用于定位真实命中的期次
+      const channelRecords = new Map()
+      poolList.forEach(({ poolKey, records }) => {
+        const channel = games[game].poolChannel?.[String(poolKey)] || ''
+        if (!channel) return
+        const top = String(games[game].ranks.top)
+        const list = channelRecords.get(channel) || []
+        records.forEach((r) => {
+          if (String(r.rank_type) === top) list.push(r)
         })
-        const rate = pct(stats.knownCount, stats.topCount)
-        console.log(
-          `  池 ${pad(poolKey, 4)} ${pad(channel || '(无排期)', 12)} 记录 ${pad(stats.total, 6)} ` +
-          `最高级 ${pad(stats.topCount, 4)} 可判定 ${pad(stats.knownCount, 4)}(${rate}) ` +
-          `UP ${pad(stats.upCount, 4)} 歪 ${pad(stats.lostCount, 4)} 不可判定 ${pad(stats.unknownCount, 4)}` +
-          (excluded ? '  [不参与歪率统计]' : '') +
-          `  不歪率 ${(stats.noDeviationRate * 100).toFixed(2)}%` +
-          `  平均UP ${stats.avgUpPulls}抽 平均5星 ${stats.avgTopPulls}抽` +
-          `  最欧${stats.minTopPulls}/最非${stats.maxTopPulls}`
-        )
-        if (stats.unknownCount > 0 && !excluded) {
-          problems++
-          const samples = marked.filter((m) => m.top && !m.known).slice(0, 5)
-          samples.forEach((m) => {
-            console.log(`      ↳ 不可判定：${m.time}  ${m.name}  (${m.item_type})`)
-          })
-          if (stats.unknownCount > samples.length) {
-            console.log(`      ↳ …另有 ${stats.unknownCount - samples.length} 条不可判定记录`)
-          }
-        }
-        // 可判定但一个 UP 都没有：多半是池与排期的映射有问题（例如复刻池）
-        if (!excluded && stats.knownCount >= 3 && stats.upCount === 0) {
-          suspicious++
-          console.log(`      ⚠ 可判定 ${stats.knownCount} 条却无 UP，疑似池映射有误`)
-        }
+        channelRecords.set(channel, list)
+      })
+      const gapped = makeGap(banners, channelRecords)
+      console.log(`  [模拟缺口] ${gapped} 个期次的 UP 名单已置空（模拟数据过期/缺失）`)
+      report(game, banners, poolList, { count: false })
+      console.log('')
+    }
+
+    if (useInfer) {
+      const { inferred, pending } = inferGame({ game, pools: poolList, banners })
+      console.log(`  本地反推：高置信 ${inferred.length} 期，待人工确认 ${pending.length} 期`)
+      inferred.forEach((b) => {
+        console.log(`      + ${b.channel} ${b.start} ~ ${b.end}  UP=${b.up.join('、')}`)
+      })
+      pending.forEach((b) => {
+        console.log(`      ? ${b.channel} ${b.start} ~ ${b.end}  候选=${b.candidates.join('、')}（需人工确认）`)
+      })
+      if (inferred.length) {
+        banners = mergeBanners(banners, inferred, { overrideUp: false, overrideTime: false, fillEmptyUp: true }).banners
       }
     }
+
+    const r = report(game, banners, poolList, useInfer ? 'infer' : 'base')
+    problems += r.problems
+    suspicious += r.suspicious
     console.log('')
   }
 
