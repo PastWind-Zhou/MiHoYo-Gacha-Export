@@ -46,20 +46,19 @@ const writeJSONSafe = async (p, data) => {
   await fs.writeJSON(p, data, { spaces: 2 })
 }
 
-// ---------- 时间工具 ----------
-// 卡池时间一律按 UTC+8 解释（与游戏服务器时区一致）
-const parseLocal = (s) => {
-  if (!s) return NaN
-  const t = String(s).trim().replace(' ', 'T')
-  const d = new Date(/[Zz]|[+-]\d\d:?\d\d$/.test(t) ? t : t + '+08:00')
-  return d.getTime()
-}
-const formatLocal = (ms) => {
-  const d = new Date(ms + 8 * 3600 * 1000)
-  const p = (n) => String(n).padStart(2, '0')
-  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` +
-    `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
-}
+// ---------- 时间工具 / 判定核心 ----------
+// 判定与统计的纯逻辑放在 utils/bannerJudge.js（不依赖 Electron，便于 Node 脚本与单测复用），
+// 这里直接引入并对外 re-export，保证数据加载与判定两处逻辑不会漂移。
+const {
+  parseLocal,
+  formatLocal,
+  bannersAt,
+  isUpAt,
+  judgePool,
+  calcPoolStats,
+  analyzePool,
+  fillJiluStarts
+} = require('./utils/bannerJudge')
 
 // ---------- 规范化 ----------
 // 统一为内部结构：{ version, phase, channel, title, start, end, up: [], up4: [], upByType? }
@@ -238,20 +237,7 @@ const saveOverride = async (game, set) => {
 }
 
 // ---------- 集录祈愿开始时间补齐 ----------
-// 「集录祈愿」与同版本同相位的角色池同期开放，其 wiki 上的起始时间是
-// 「X版本更新后」这类文字描述，无法直接解析。
-// 这里用内置角色池的同期开始时间补齐（内置数据的上游推定更准）。
-const fillJiluStarts = (banners) => {
-  const charPools = banners.filter((b) => b.channel === 'character')
-  return banners.map((b) => {
-    if (b.channel !== 'jilu' || b.start) return b
-    const same = charPools.filter((c) => c.version === b.version && (!b.phase || c.phase === b.phase))
-    const pool = same.length ? same : charPools.filter((c) => c.version === b.version)
-    if (!pool.length) return b
-    const start = pool.map((c) => c.start).filter(Boolean).sort()[0]
-    return start ? { ...b, start } : b
-  })
-}
+// 见 utils/bannerJudge.js（fillJiluStarts）
 
 // ---------- 合并内置 + 覆盖层 ----------
 const getLocalBanners = async (game) => {
@@ -472,52 +458,8 @@ const getBanners = async (game) => {
   return local.banners
 }
 
-// 查询某时刻某 channel 开放的卡池
-const bannersAt = (banners, channel, timeMs) => {
-  const out = []
-  for (const b of banners) {
-    if (b.channel !== channel) continue
-    const s = parseLocal(b.start)
-    const e = parseLocal(b.end)
-    if (!e) continue
-    if (timeMs >= s && timeMs <= e) out.push(b)
-  }
-  return out
-}
-
-// 判断某物品在某时刻是否为当期 UP
-// 返回 { up, known }：known=false 表示该时刻没有卡池数据，无法判定
-//
-// 名称归一化：不同数据源的引号写法不一致（米游社用『』、内置基线用「」、
-// 抽卡记录用「」或无引号），因此比较时同时尝试「原样」与「去引号」两种形式。
-const nameKeys = (s) => {
-  const raw = String(s || '').trim()
-  const plain = raw
-    .replace(/[「」『』"'“”]/g, '')
-    .split(/\s+/).join(' ')
-  const stripped = raw.replace(/^[「『"'“]|[」』"'”]$/g, '').split(/\s+/).join(' ')
-  return [raw, plain, stripped]
-}
-
-const isUpAt = (banners, channel, name, timeMs, itemType) => {
-  const active = bannersAt(banners, channel, timeMs)
-  if (!active.length) return { up: false, known: false }
-  const keys = nameKeys(name)
-  for (const b of active) {
-    // 混合池（原神集录祈愿）：角色与武器的 UP 名单分开，按记录类型取用
-    let list = b.up || []
-    if (b.upByType && itemType) {
-      const t = String(itemType)
-      if (/角色|代理/.test(t)) list = b.upByType.character || []
-      else if (/武器|光锥|音擎/.test(t)) list = b.upByType.weapon || []
-    }
-    for (const u of list) {
-      const uk = nameKeys(u)
-      if (uk.some((x) => keys.some((y) => x === y))) return { up: true, known: true }
-    }
-  }
-  return { up: false, known: true }
-}
+// 查询某时刻某 channel 开放的卡池、判断某物品是否为当期 UP：
+// 见 utils/bannerJudge.js（bannersAt / isUpAt）
 
 // ---------- 歪率统计排除 ----------
 // 某些池无法判定 UP/歪（如原神集录祈愿的定轨目标由玩家自选，官方不返回），
@@ -547,6 +489,9 @@ module.exports = {
   sameBannerSet,
   bannersAt,
   isUpAt,
+  judgePool,
+  calcPoolStats,
+  analyzePool,
   isDeviationExcluded,
   poolToChannel,
   parseLocal,

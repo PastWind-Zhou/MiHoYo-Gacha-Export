@@ -122,12 +122,14 @@ const games = {
     hideKey: 'hideStandard',
     hidePool: '1',
     // 抽卡记录池 → 卡池排期 channel
-    //   2 独家频段 / 5 独家重映 / 102 音擎回响 → character
-    //   3 音擎频段 / 103 音擎回响 → engine
+    //   2 独家频段 → character
+    //   3 音擎频段 → engine
+    //   102 音擎回响(角色) / 103 音擎回响(音擎) → 与常规池同期，可参考排期
+    //   5 独家重映 → 无排期数据（复刻池 UP 取决于当期复刻对象，常规排期推不出）
     //   1 常驻频段 / 邦布频段 → 无排期数据（常驻池本就没有 UP 概念）
-    poolChannel: { '2': 'character', '3': 'engine', '5': 'character', '102': 'character', '103': 'engine' },
-    // 不参与歪率统计的池：常驻/回响/邦布池无 UP 概念
-    noDeviationPools: ['1', '102', '103'],
+    poolChannel: { '2': 'character', '3': 'engine', '102': 'character', '103': 'engine' },
+    // 不参与歪率统计的池：常驻/回响/邦布池无 UP 概念；独家重映池 UP 不可判定
+    noDeviationPools: ['1', '5', '102', '103'],
     ranks: { low: '2', mid: '3', top: '4' },
     bangboo: true,
     idMode: 'item',
