@@ -36,7 +36,13 @@ const buildWaiwaiStats = ({ game, result, banners = [], types = [] }) => {
     })
   }
 
-  pools.sort((a, b) => Number(a.poolKey) - Number(b.poolKey))
+  // 池键通常是数字串；非数字时按 NaN 比较会得到乱序，这里做兜底
+  pools.sort((a, b) => {
+    const av = Number(a.poolKey)
+    const bv = Number(b.poolKey)
+    if (Number.isFinite(av) && Number.isFinite(bv)) return av - bv
+    return String(a.poolKey).localeCompare(String(b.poolKey))
+  })
   return { game, pools }
 }
 

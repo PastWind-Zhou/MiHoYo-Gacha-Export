@@ -170,5 +170,6 @@
   "excel.waiwai.deviation2": "Trượt 2 lần",
   "excel.waiwai.deviation3": "Trượt 3 lần",
   "excel.waiwai.guaranteed": "Số lần bảo đảm",
-  "excel.waiwai.excludedSuffix": " (không tính)"
+  "excel.waiwai.excludedSuffix": " (không tính)",
+  "excel.raw.sheet": "Raw Data"
 }

@@ -57,7 +57,7 @@ const {
   judgePool,
   calcPoolStats,
   analyzePool,
-  fillJiluStarts
+  alignJiluTimes
 } = require('./utils/bannerJudge')
 
 // ---------- 规范化 ----------
@@ -168,7 +168,7 @@ const saveLocalInferred = async (game, set) => {
 }
 
 // ---------- 集录祈愿开始时间补齐 ----------
-// 见 utils/bannerJudge.js（fillJiluStarts）
+// 见 utils/bannerJudge.js（alignJiluTimes）
 
 // ---------- 合并内置 + 本地反推 + 覆盖层 ----------
 // 三层优先级（方案 §2.1）：
@@ -192,7 +192,7 @@ const getLocalBanners = async (game) => {
   // 第③层：手动 / 远程覆盖（UP 以覆盖层为准）
   const override = await getOverride(game)
   if (!override || !override.banners.length) {
-    return { ...builtin, banners: fillJiluStarts(withInferred) }
+    return { ...builtin, banners: alignJiluTimes(withInferred) }
   }
   const merged = mergeBanners(withInferred, override.banners)
   return {
@@ -200,7 +200,7 @@ const getLocalBanners = async (game) => {
     timezone: 'UTC+8',
     updated: override.updated || builtin.updated,
     note: override.note || builtin.note,
-    banners: fillJiluStarts(merged.banners)
+    banners: alignJiluTimes(merged.banners)
   }
 }
 
@@ -258,8 +258,26 @@ const fetchRemoteJSON = async (url, options = {}) => {
         timeout
       })
       if (!res.ok) throw new Error('HTTP ' + res.status)
-      const text = await res.text()
-      if (text.length > MAX_REMOTE_BYTES) throw new Error('response too large')
+      // 流式读取并在超限时中断：先读完再判断长度的话，
+      // 超大响应已经占满内存，8MB 上限形同虚设
+      const reader = res.body && res.body.getReader ? res.body.getReader() : null
+      let text = ''
+      if (reader) {
+        const decoder = new TextDecoder('utf-8')
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          text += decoder.decode(value, { stream: true })
+          if (text.length > MAX_REMOTE_BYTES) {
+            try { await reader.cancel() } catch (e) {}
+            throw new Error('response too large')
+          }
+        }
+        text += decoder.decode()
+      } else {
+        text = await res.text()
+        if (text.length > MAX_REMOTE_BYTES) throw new Error('response too large')
+      }
       return JSON.parse(text)
     } catch (e) {
       lastError = e
@@ -415,9 +433,20 @@ const syncBanners = async (game, options = {}) => {
 
   // 保留已有的手动修正（手动优先于远程）
   const current = await getOverride(game)
-  const manualEntries = (current?.banners || []).filter((b) => b.source === 'manual')
+  const existingEntries = current?.banners || []
+  const manualEntries = existingEntries.filter((b) => b.source === 'manual')
   const manualKeys = new Set(manualEntries.map((b) => `${b.channel}@${b.start}`))
   const remoteChanges = merged.changes.filter((b) => !manualKeys.has(`${b.channel}@${b.start}`))
+
+  // 本次同步覆盖到的期次（以 channel@start 为键）
+  const syncedKeys = new Set(remoteChanges.map((b) => `${b.channel}@${b.start}`))
+  // 覆盖层里此前同步来的、本次上游未再返回的期次必须保留：
+  // 米游社源只提供当期卡池，若每次都用本次变更重建整份覆盖层，
+  // 这些历史期次会被逐次清空，导致历史卡池永久丢失。
+  const keptRemoteEntries = existingEntries.filter((b) => {
+    if (b.source === 'manual') return false
+    return !syncedKeys.has(`${b.channel}@${b.start}`)
+  })
 
   const partial = from === 'mihoyo-wiki'
   const set = {
@@ -427,7 +456,7 @@ const syncBanners = async (game, options = {}) => {
     note: partial
       ? `由 MiHoYoGachaExport 同步自 ${from}（仅当期卡池，历史沿用本地）`
       : '由 MiHoYoGachaExport 同步自 ' + from,
-    banners: [...manualEntries, ...remoteChanges]
+    banners: [...manualEntries, ...keptRemoteEntries, ...remoteChanges]
   }
   await saveOverride(game, set)
 

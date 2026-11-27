@@ -143,25 +143,35 @@ const fetchMihoyoBanners = async (game) => {
   if (!list.length) throw new Error('gacha_pool returned empty list')
 
   // 卡池代号 -> 时间区间（含所属公告 postId）
+  // 公告链接格式随米游社改版变化，兼容多种形态：
+  //   .../article/12345、.../post/12345、...?post_id=12345
+  const extractPostId = (url) => {
+    const s = String(url || '')
+    const m = s.match(/\/(?:article|post)\/(\d+)/) || s.match(/[?&]post_id=(\d+)/) || s.match(/(\d{6,})/)
+    return m ? m[1] : ''
+  }
   const periods = list.map((x) => ({
     title: normTitle(x.title),
     rawTitle: x.title,
     start: x.start_time || '',
     end: x.end_time || '',
-    postId: (String(x.activity_url || '').match(/article\/(\d+)/) || [])[1]
+    postId: extractPostId(x.activity_url)
   }))
 
   // 抓所有公告，解析出全部当期卡池（按 postId 分组）
   const postIds = [...new Set(periods.map((p) => p.postId).filter(Boolean))]
   const parsed = []
-  for (const postId of postIds) {
-    let post
+  // 公告并发抓取：串行时总耗时是各篇之和（每篇 30s 超时），
+  // 并发后总耗时取决于最慢的一篇
+  const postResults = await Promise.all(postIds.map(async (postId) => {
     try {
       const r = await fetchJSON(POST_API(postId), { Referer: 'https://bbs.mihoyo.com/' })
-      post = r.data && r.data.post && r.data.post.post
+      return { postId, post: r.data && r.data.post && r.data.post.post }
     } catch (e) {
-      continue
+      return { postId, post: null, error: e && e.message }
     }
+  }))
+  for (const { postId, post } of postResults) {
     if (!post || !post.content) continue
     for (const item of parseUpsFromPost(post.content, post.subject || '')) {
       parsed.push({ ...item, postId })
@@ -180,6 +190,8 @@ const fetchMihoyoBanners = async (game) => {
   //   2. 段内无法按名称匹配 → 用同公告内剩余的代号（联动池名称与代号无关时）
   const banners = []
   const usedPeriods = new Set()
+  // 匹配不上时间区间的段落：跳过并记录，避免写入错误时间
+  const unresolvedSections = []
 
   // 按 (postId, section) 分组
   const groups = new Map()
@@ -212,7 +224,21 @@ const fetchMihoyoBanners = async (game) => {
       if (rest.length) period = rest[0]
     }
     // 3. 兜底
-    if (!period) period = periods.find((p) => p.postId === items[0].postId) || periods[0]
+    //    这里不能用 periods[0]：匹配失败时把第一个代号的时间赋给所有段，
+    //    会静默写入错误的时间（比直接失败更危险）。
+    //    宁可跳过该段并记录警告，交给其它数据源补齐。
+    if (!period) {
+      const anyInPost = periods.find((p) => p.postId === items[0].postId)
+      if (anyInPost) {
+        period = anyInPost
+      } else {
+        unresolvedSections.push({
+          title: items[0] && items[0].title,
+          postId: items[0] && items[0].postId
+        })
+        continue
+      }
+    }
     if (period) usedPeriods.add(period)
 
     for (const item of items) {
@@ -234,6 +260,9 @@ const fetchMihoyoBanners = async (game) => {
     timezone: 'UTC+8',
     updated: new Date().toISOString().slice(0, 10),
     note: '米游社官方 wiki 当期卡池',
+    ...(unresolvedSections.length
+      ? { warnings: unresolvedSections.map((s) => `未能匹配时间区间: ${s.title || ''}`) }
+      : {}),
     banners
   }
 }

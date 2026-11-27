@@ -87,8 +87,13 @@ import { reactive, computed, onMounted } from 'vue'
 
 const props = defineProps({
   i18n: Object,
-  gameInfo: Object
+  gameInfo: Object,
+  game: String
 })
+
+// 当前游戏 id：优先用父组件显式传入的 game，
+// 否则退回 gameInfo.game（主进程 getGameInfo 会返回 game 字段）
+const currentGame = computed(() => props.game || props.gameInfo?.game || '')
 
 const { ipcRenderer } = require('electron')
 const { ElMessage } = require('element-plus')
@@ -175,7 +180,7 @@ const setMessage = (msg, failed = false) => {
 }
 
 const loadTable = async () => {
-  const data = await ipcRenderer.invoke('GET_BANNER_TABLE')
+  const data = await ipcRenderer.invoke('GET_BANNER_TABLE', currentGame.value)
   state.rows = data?.banners || []
 }
 
@@ -199,7 +204,7 @@ const doSync = async () => {
   setMessage('')
   try {
     await saveConfig()
-    const result = await ipcRenderer.invoke('SYNC_BANNERS')
+    const result = await ipcRenderer.invoke('SYNC_BANNERS', currentGame.value)
     if (result?.action === 'failed') {
       setMessage(result.message || text.value.syncFailed, true)
     } else {
@@ -217,7 +222,7 @@ const doSync = async () => {
 const doClearRemote = async () => {
   state.working = true
   try {
-    const result = await ipcRenderer.invoke('CLEAR_REMOTE_BANNERS')
+    const result = await ipcRenderer.invoke('CLEAR_REMOTE_BANNERS', currentGame.value)
     setMessage(`${text.value.cleared} (${result?.removed ?? 0})`)
     await loadTable()
   } catch (e) {
@@ -230,7 +235,7 @@ const doClearRemote = async () => {
 const doImport = async () => {
   state.working = true
   try {
-    const result = await ipcRenderer.invoke('IMPORT_BANNER_JSON')
+    const result = await ipcRenderer.invoke('IMPORT_BANNER_JSON', currentGame.value)
     if (result?.canceled) {
       setMessage('')
     } else if (result?.ok) {
@@ -265,16 +270,25 @@ const doSaveUp = async () => {
     .split(/[,，、\n;；]/)
     .map((x) => x.trim())
     .filter(Boolean)
-  const result = await ipcRenderer.invoke('SAVE_BANNER_UP', {
-    channel: editRow.channel,
-    start: editRow.start,
-    end: editRow.end,
-    version: editRow.version,
-    phase: editRow.phase,
-    title: editRow.title,
-    up4: editRow.up4,
-    up
-  })
+  state.working = true
+  let result
+  try {
+    // 主进程签名是 (gameId, edit)，两个参数都要传
+    result = await ipcRenderer.invoke('SAVE_BANNER_UP', currentGame.value, {
+      channel: editRow.channel,
+      start: editRow.start,
+      end: editRow.end,
+      version: editRow.version,
+      phase: editRow.phase,
+      title: editRow.title,
+      up4: editRow.up4,
+      up
+    })
+  } catch (e) {
+    setMessage(`${text.value.saveFailed}: ${e.message}`, true)
+    state.working = false
+    return
+  }
   if (result?.ok) {
     state.editVisible = false
     setMessage(text.value.saved)
@@ -282,6 +296,7 @@ const doSaveUp = async () => {
   } else {
     setMessage(`${text.value.saveFailed}: ${result?.error || ''}`, true)
   }
+  state.working = false
 }
 
 onMounted(async () => {

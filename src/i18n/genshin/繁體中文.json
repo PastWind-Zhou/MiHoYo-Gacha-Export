@@ -181,5 +181,16 @@
   "excel.waiwai.deviation2": "歪2次",
   "excel.waiwai.deviation3": "歪3次",
   "excel.waiwai.guaranteed": "大保底數",
-  "excel.waiwai.excludedSuffix": "（不參與統計）"
+  "excel.waiwai.excludedSuffix": "（不參與統計）",
+  "ui.setting.dataManagerHint": "Unnecessary data can be deleted",
+  "ui.common.data": "Data",
+  "ui.common.dataManage": "Data Management",
+  "ui.common.updateTime": "Update Date",
+  "ui.common.status": "Status",
+  "ui.common.action": "Operation",
+  "ui.common.deleted": "Deleted",
+  "ui.common.normal": "Normal",
+  "ui.common.delete": "Delete",
+  "ui.common.restore": "Restore",
+  "excel.raw.sheet": "Raw Data"
 }

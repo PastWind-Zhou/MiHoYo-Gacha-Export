@@ -205,5 +205,6 @@
   "excel.waiwai.deviation2": "歪2次",
   "excel.waiwai.deviation3": "歪3次",
   "excel.waiwai.guaranteed": "大保底數",
-  "excel.waiwai.excludedSuffix": "（不參與統計）"
+  "excel.waiwai.excludedSuffix": "（不參與統計）",
+  "excel.raw.sheet": "Raw Data"
 }

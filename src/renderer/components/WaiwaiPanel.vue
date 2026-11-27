@@ -21,7 +21,7 @@
           <span class="text-right text-green-600">{{pool.stats.avgTopPulls}} {{text.pulls}}</span>
 
           <span>{{text.luckiest}} / {{text.unluckiest}}</span>
-          <span class="text-right">{{pool.stats.minTopPulls}} / {{pool.stats.maxTopPulls}}</span>
+          <span class="text-right">{{pool.stats.minTopPulls ?? '-'}} / {{pool.stats.maxTopPulls ?? '-'}}</span>
 
           <span>{{text.upHitRate}}</span>
           <span class="text-right text-yellow-500">{{percent(pool.stats.upHitRate)}}</span>
@@ -62,12 +62,18 @@ const percent = (value) => {
 }
 
 // 连续歪的次数分布：[{'1': 次数}, ...] → [{ n, count }]
-const dist = (pool) => {
-  const map = pool?.stats?.deviationHistogram || {}
-  return Object.keys(map)
-    .map((n) => ({ n: Number(n), count: map[n] }))
-    .sort((a, b) => a.n - b.n)
-}
+// 预先算好并按 poolKey 缓存，避免模板里重复计算
+const distMap = computed(() => {
+  const map = {}
+  for (const pool of pools.value) {
+    const hist = pool?.stats?.deviationHistogram || {}
+    map[pool.poolKey] = Object.keys(hist)
+      .map((n) => ({ n: Number(n), count: hist[n] }))
+      .sort((a, b) => a.n - b.n)
+  }
+  return map
+})
+const dist = (pool) => distMap.value[pool?.poolKey] || []
 
 // 「歪{n}次」模板
 const deviationItem = (n) => {

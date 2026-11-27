@@ -196,5 +196,6 @@
   "excel.waiwai.deviation2": "2 échecs",
   "excel.waiwai.deviation3": "3 échecs",
   "excel.waiwai.guaranteed": "Nombre de garantis",
-  "excel.waiwai.excludedSuffix": " (non inclus)"
+  "excel.waiwai.excludedSuffix": " (non inclus)",
+  "excel.raw.sheet": "Raw Data"
 }

@@ -33,13 +33,13 @@
           v-model="settingForm.autoUpdate">
         </el-switch>
       </el-form-item>
-      <el-form-item v-if="gameInfo.hideKey === 'hideNovice'" :label="text.hideNovice">
+      <el-form-item v-if="gameInfo?.hideKey === 'hideNovice'" :label="text.hideNovice">
         <el-switch
           @change="saveSetting"
           v-model="settingForm.hideNovice">
         </el-switch>
       </el-form-item>
-      <el-form-item v-else-if="gameInfo.hideKey === 'hideStandard'" :label="text.hideStandard">
+      <el-form-item v-else-if="gameInfo?.hideKey === 'hideStandard'" :label="text.hideStandard">
         <el-switch
           @change="saveSetting"
           v-model="settingForm.hideStandard">
@@ -63,7 +63,7 @@
       </el-form-item>
     </el-form>
     <h3 class="text-lg my-4">{{about.title}}</h3>
-    <p class="text-gray-600 text-xs mt-1">{{text.idVersion}} {{gameInfo.idVersion || '-'}}</p>
+    <p class="text-gray-600 text-xs mt-1">{{text.idVersion}} {{gameInfo?.idVersion || '-'}}</p>
     <p class="text-gray-600 text-xs mt-1">{{about.license}}</p>
     <p class="text-gray-600 text-xs mt-1">GitHub:
       <a @click="openLink('https://github.com/biuuu/genshin-wish-export')" class="cursor-pointer text-blue-400">genshin-wish-export</a>
@@ -99,7 +99,7 @@
         </el-table>
       </div>
     </el-dialog>
-    <el-dialog v-model="state.showBannerDialog" :title="banner.text.title" width="92%">
+    <el-dialog v-model="state.showBannerDialog" :title="banner.title" width="92%">
       <banner-manager :i18n="i18n" :game-info="gameInfo"></banner-manager>
     </el-dialog>
   </div>
@@ -139,10 +139,14 @@ const state = reactive({
   dataActionLoading: false
 })
 
-const common = computed(() => props.i18n.ui.common)
-const text = computed(() => props.i18n.ui.setting)
-const about = computed(() => props.i18n.ui.about)
-const banner = computed(() => props.i18n.ui.banner || {})
+// i18n 可能还没加载完成（props.i18n 为 null），
+// 直接 props.i18n.ui.xxx 会抛 TypeError，
+// 导致整个设置页渲染失败、按钮点击无响应。
+// 这里统一用可选链兜底。
+const common = computed(() => props.i18n?.ui?.common || {})
+const text = computed(() => props.i18n?.ui?.setting || {})
+const about = computed(() => props.i18n?.ui?.about || {})
+const banner = computed(() => props.i18n?.ui?.banner || {})
 const gameInfo = computed(() => props.gameInfo)
 
 // 时间格式化：无有效时间时显示 '-'
@@ -175,9 +179,15 @@ const openLink = (link) => shell.openExternal(link)
 
 const deleteData = async (uid, action) => {
   state.dataActionLoading = true
-  await ipcRenderer.invoke('DELETE_DATA', uid, action)
-  state.dataActionLoading = false
-  emit('refreshData')
+  try {
+    await ipcRenderer.invoke('DELETE_DATA', uid, action)
+    emit('refreshData')
+  } catch (e) {
+    console.error('delete data failed', e)
+  } finally {
+    // 必须复位，否则 IPC 异常时按钮会永久禁用
+    state.dataActionLoading = false
+  }
 }
 
 onMounted(async () => {

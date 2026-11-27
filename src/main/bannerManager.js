@@ -46,13 +46,22 @@ const getBannerTable = async (gameId) => {
 }
 
 // 手动修正某期 UP 名单
+// 兼容两种调用形态：
+//   saveBannerUp(gameId, edit) —— 标准形态
+//   saveBannerUp(edit)         —— 早期渲染层只传了 edit 对象
 const saveBannerUp = async (gameId, edit) => {
-  const game = gameId || config.game
-  const entry = buildManualBanner(edit)
+  let game = gameId
+  let payload = edit
+  if (!edit && gameId && typeof gameId === 'object') {
+    payload = gameId
+    game = null
+  }
+  const target = game || config.game
+  const entry = buildManualBanner(payload)
   if (!entry) return { ok: false, error: 'invalid' }
-  const current = await getOverride(game)
+  const current = await getOverride(target)
   const banners = upsertManualBanner(current?.banners || [], entry)
-  await saveOverride(game, {
+  await saveOverride(target, {
     source: 'manual',
     timezone: 'UTC+8',
     updated: today(),
@@ -167,14 +176,40 @@ const maybeSync = async (gameId) => {
   }
 }
 
-ipcMain.handle('GET_BANNER_TABLE', async (event, gameId) => await getBannerTable(gameId))
-ipcMain.handle('SAVE_BANNER_UP', async (event, gameId, edit) => await saveBannerUp(gameId, edit))
-ipcMain.handle('IMPORT_BANNER_JSON', async (event, gameId) => await importBannerJSON(gameId))
-ipcMain.handle('SYNC_BANNERS', async (event, gameId, options) => await syncNow(gameId, options || {}))
-ipcMain.handle('CLEAR_REMOTE_BANNERS', async (event, gameId) => await clearRemote(gameId))
-ipcMain.handle('GET_BANNER_SOURCE_CONFIG', async () => getSourceConfig())
-ipcMain.handle('SAVE_BANNER_SOURCE_CONFIG', async (event, patch) => await saveSourceConfig(patch || {}))
-ipcMain.handle('MAYBE_SYNC_BANNERS', async (event, gameId) => await maybeSync(gameId))
+// 所有 handler 都依赖 config.game（未传 gameId 时回退到当前游戏），
+// 必须等配置加载完成，否则会用默认游戏操作错误的卡池数据
+ipcMain.handle('GET_BANNER_TABLE', async (event, gameId) => {
+  await config.ready
+  return await getBannerTable(gameId)
+})
+ipcMain.handle('SAVE_BANNER_UP', async (event, gameId, edit) => {
+  await config.ready
+  return await saveBannerUp(gameId, edit)
+})
+ipcMain.handle('IMPORT_BANNER_JSON', async (event, gameId) => {
+  await config.ready
+  return await importBannerJSON(gameId)
+})
+ipcMain.handle('SYNC_BANNERS', async (event, gameId, options) => {
+  await config.ready
+  return await syncNow(gameId, options || {})
+})
+ipcMain.handle('CLEAR_REMOTE_BANNERS', async (event, gameId) => {
+  await config.ready
+  return await clearRemote(gameId)
+})
+ipcMain.handle('GET_BANNER_SOURCE_CONFIG', async () => {
+  await config.ready
+  return getSourceConfig()
+})
+ipcMain.handle('SAVE_BANNER_SOURCE_CONFIG', async (event, patch) => {
+  await config.ready
+  return await saveSourceConfig(patch || {})
+})
+ipcMain.handle('MAYBE_SYNC_BANNERS', async (event, gameId) => {
+  await config.ready
+  return await maybeSync(gameId)
+})
 
 module.exports = {
   getBannerTable,

@@ -28,7 +28,11 @@ const validateBannerImport = (json) => {
       continue
     }
     // 时间必须能被解析，否则无法参与判定
-    if (!parseLocal(start) || !parseLocal(end)) {
+    // 注意不能用 !parseLocal(x) 判断：epoch 0（1970-01-01 08:00:00）是合法时刻，
+    // 但 !0 为 true，会被误判为非法
+    const startMs = parseLocal(start)
+    const endMs = parseLocal(end)
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
       invalid++
       continue
     }
@@ -78,14 +82,21 @@ const isSameBanner = (a, b) => {
 }
 
 // 合并手动修正条目：已存在则覆盖（UP 名单以本次为准）
+// 深拷贝条目，避免调用方后续修改对象污染已保存的列表
 const upsertManualBanner = (banners = [], entry) => {
   if (!entry) return banners
-  const list = [...banners]
+  const clone = (b) => ({
+    ...b,
+    up: [...(b.up || [])],
+    up4: [...(b.up4 || [])],
+    ...(b.upByType ? { upByType: { character: [...(b.upByType.character || [])], weapon: [...(b.upByType.weapon || [])] } } : {})
+  })
+  const list = [...banners].map(clone)
   const index = list.findIndex((b) => isSameBanner(b, entry))
   if (index >= 0) {
-    list[index] = entry
+    list[index] = clone(entry)
   } else {
-    list.push(entry)
+    list.push(clone(entry))
   }
   return list
 }

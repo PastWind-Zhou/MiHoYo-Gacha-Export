@@ -191,5 +191,16 @@
   "ui.banner.channelWeapon": "武器",
   "ui.banner.channelLightcone": "光锥",
   "ui.banner.channelEngine": "音擎",
-  "ui.banner.channelJilu": "集录祈愿"
+  "ui.banner.channelJilu": "集录祈愿",
+  "ui.setting.dataManagerHint": "可以删除不需要的数据。",
+  "ui.common.data": "数据",
+  "ui.common.dataManage": "数据管理",
+  "ui.common.updateTime": "更新日期",
+  "ui.common.status": "状态",
+  "ui.common.action": "操作",
+  "ui.common.deleted": "已删除",
+  "ui.common.normal": "正常",
+  "ui.common.delete": "删除",
+  "ui.common.restore": "恢复",
+  "excel.raw.sheet": "原始数据"
 }

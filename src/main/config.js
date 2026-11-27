@@ -45,10 +45,20 @@ const getLocalConfig = async () => {
   if (configTemp.game && !isValidGame(configTemp.game)) {
     configTemp.game = 'hkrpg'
   }
+  // currents 要逐游戏合并，不能整体替换：
+  // 整体替换会丢掉运行期间刚写入的其它游戏 uid
+  if (configTemp.currents && typeof configTemp.currents === 'object') {
+    configTemp.currents = Object.assign({}, config.currents, configTemp.currents)
+  }
   Object.assign(config, configTemp)
 }
 
-getLocalConfig()
+// 读取本地配置（config.json）
+// 注意：这是异步的，模块加载时不能假定它已完成 ——
+// 期间 config.game 仍是默认值 'hkrpg'，若此时就按 config.game
+// 去读数据目录，会读到别的游戏的目录，并把 uid 写进错误游戏的槽位。
+// 因此导出 ready Promise，所有依赖 config 的入口都要先 await 它。
+const ready = getLocalConfig()
 
 let urlsMap = null
 const setConfig = (key, value) => {
@@ -75,7 +85,10 @@ const getPlainConfig = () => config
 
 const configProxy = new Proxy(config, {
   get: function (obj, prop) {
-    if (prop === 'urls') {
+    if (prop === 'ready') {
+      // 配置加载完成的信号：调用方 await 后才能信任 config.game / config.current
+      return ready
+    } else if (prop === 'urls') {
       if (!urlsMap) {
         urlsMap = new Map(obj[prop])
       }

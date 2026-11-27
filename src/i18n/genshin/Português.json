@@ -162,5 +162,16 @@
   "excel.waiwai.deviation2": "2 falhas",
   "excel.waiwai.deviation3": "3 falhas",
   "excel.waiwai.guaranteed": "N.º de garantidos",
-  "excel.waiwai.excludedSuffix": " (não incluído)"
+  "excel.waiwai.excludedSuffix": " (não incluído)",
+  "ui.setting.dataManagerHint": "Unnecessary data can be deleted",
+  "ui.common.data": "Data",
+  "ui.common.dataManage": "Data Management",
+  "ui.common.updateTime": "Update Date",
+  "ui.common.status": "Status",
+  "ui.common.action": "Operation",
+  "ui.common.deleted": "Deleted",
+  "ui.common.normal": "Normal",
+  "ui.common.delete": "Delete",
+  "ui.common.restore": "Restore",
+  "excel.raw.sheet": "Raw Data"
 }

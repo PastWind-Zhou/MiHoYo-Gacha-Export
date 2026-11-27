@@ -14,7 +14,7 @@ const fs = require('fs')
 const path = require('path')
 
 const ROOT = path.resolve(__dirname, '..')
-const { analyzePool, fillJiluStarts, parseLocal } = require(path.join(ROOT, 'src/main/utils/bannerJudge'))
+const { analyzePool, alignJiluTimes, parseLocal } = require(path.join(ROOT, 'src/main/utils/bannerJudge'))
 const { inferGame } = require(path.join(ROOT, 'src/main/utils/bannerInfer'))
 const { mergeBanners } = require(path.join(ROOT, 'src/main/utils/bannerMerge'))
 const { games } = require(path.join(ROOT, 'src/main/games'))
@@ -22,7 +22,12 @@ const { games } = require(path.join(ROOT, 'src/main/games'))
 const args = process.argv.slice(2)
 const useInfer = args.includes('--infer')
 const useGap = args.includes('--gap')
-const userDataDir = args.find((a) => !a.startsWith('--')) || 'D:\\软件\\抽卡分析\\MiHoYo\\build\\MiHoYoGachaExport-1.0.0\\userData'
+// 默认目录按当前版本号推导，避免硬编码开发者的本机绝对路径与过期版本号
+const pkg = require(path.join(ROOT, 'package.json'))
+const DEFAULT_USER_DATA = path.join(
+  ROOT, 'release', `${pkg.build.productName}-${pkg.version}`, 'userData'
+)
+const userDataDir = args.find((a) => !a.startsWith('--')) || DEFAULT_USER_DATA
 
 const BANNER_FILES = {
   genshin: ['genshin.json', 'genshin-jilu.json'],
@@ -57,7 +62,7 @@ const loadBanners = (game) => {
       })
     }
   }
-  return fillJiluStarts(all)
+  return alignJiluTimes(all)
 }
 
 // 本地记录归一化（兼容原神旧版数组格式）

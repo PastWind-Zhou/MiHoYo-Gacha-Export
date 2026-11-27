@@ -170,5 +170,6 @@
   "excel.waiwai.deviation2": "2 fallos",
   "excel.waiwai.deviation3": "3 fallos",
   "excel.waiwai.guaranteed": "N.º de garantizados",
-  "excel.waiwai.excludedSuffix": " (no incluido)"
+  "excel.waiwai.excludedSuffix": " (no incluido)",
+  "excel.raw.sheet": "Raw Data"
 }

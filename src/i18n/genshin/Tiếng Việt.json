@@ -170,5 +170,16 @@
   "excel.waiwai.deviation2": "Trượt 2 lần",
   "excel.waiwai.deviation3": "Trượt 3 lần",
   "excel.waiwai.guaranteed": "Số lần bảo đảm",
-  "excel.waiwai.excludedSuffix": " (không tính)"
+  "excel.waiwai.excludedSuffix": " (không tính)",
+  "ui.setting.dataManagerHint": "Unnecessary data can be deleted",
+  "ui.common.data": "Data",
+  "ui.common.dataManage": "Data Management",
+  "ui.common.updateTime": "Update Date",
+  "ui.common.status": "Status",
+  "ui.common.action": "Operation",
+  "ui.common.deleted": "Deleted",
+  "ui.common.normal": "Normal",
+  "ui.common.delete": "Delete",
+  "ui.common.restore": "Restore",
+  "excel.raw.sheet": "Raw Data"
 }

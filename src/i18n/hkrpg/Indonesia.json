@@ -169,5 +169,6 @@
   "excel.waiwai.deviation2": "2 gagal",
   "excel.waiwai.deviation3": "3 gagal",
   "excel.waiwai.guaranteed": "Jumlah dijamin",
-  "excel.waiwai.excludedSuffix": " (tidak dihitung)"
+  "excel.waiwai.excludedSuffix": " (tidak dihitung)",
+  "excel.raw.sheet": "Raw Data"
 }

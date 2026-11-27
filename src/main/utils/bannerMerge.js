@@ -15,7 +15,47 @@
 const { parseLocal } = require('./bannerJudge')
 
 const bannerKey = (b) => `${b.channel}@${String(b.end || '').slice(0, 10)}`
-const upSetKey = (b) => (b.up || []).slice().sort().join('|')
+
+// 某个卡池是否带有 UP 信息（up 名单或 upByType 拆分名单任一非空）
+const hasUpInfo = (b) => {
+  if (!b) return false
+  if ((b.up || []).length) return true
+  const t = b.upByType
+  if (!t) return false
+  return (t.character || []).length > 0 || (t.weapon || []).length > 0
+}
+
+// 深拷贝 upByType（避免共享引用被外部改写）
+const cloneUpByType = (t) => {
+  if (!t) return undefined
+  return {
+    character: [...(t.character || [])],
+    weapon: [...(t.weapon || [])]
+  }
+}
+
+// UP 指纹：同时包含 up 与 upByType。
+// 集录祈愿（jilu）等混合池的 UP 分角色/武器两类存放，
+// 只比较 up 会导致 upByType 上的修正永远判定为「没变」而被丢弃。
+const upFingerprint = (b) => {
+  const up = (b && b.up ? b.up : []).slice().sort().join('|')
+  const t = b && b.upByType
+  const c = t ? (t.character || []).slice().sort().join('|') : ''
+  const w = t ? (t.weapon || []).slice().sort().join('|') : ''
+  return up + '@' + c + '#' + w
+}
+
+// 配对用的键：优先用 up 名单；up 为空时退化为 upByType，
+// 避免「只有 upByType」的卡池全部落到同一个空键上而互相错配
+const upSetKey = (b) => {
+  const up = (b && b.up ? b.up : []).slice().sort().join('|')
+  if (up) return up
+  const t = b && b.upByType
+  if (!t) return ''
+  const c = (t.character || []).slice().sort().join('|')
+  const w = (t.weapon || []).slice().sort().join('|')
+  return `bt:${c}#${w}`
+}
 
 // 结束时间是否发生了实质变化（日期不同才算）
 const endChanged = (a, b) => String(a || '').slice(0, 10) !== String(b || '').slice(0, 10)
@@ -30,12 +70,25 @@ const mergeBanners = (base, incoming, options = {}) => {
   const overrideUp = options.overrideUp !== false
   const overrideTime = options.overrideTime !== false
   const fillEmptyUp = options.fillEmptyUp === true
+  base = Array.isArray(base) ? base : []
+  incoming = Array.isArray(incoming) ? incoming : []
+  // 取出 UP 名单（up + upByType），upByType 与 up 一同受合并策略控制
   const takeUpOf = (baseBanner, incomingBanner) => {
     const baseUp = baseBanner.up || []
     const incUp = incomingBanner.up || []
-    if (overrideUp) return incUp
-    if (fillEmptyUp && baseUp.length === 0 && incUp.length > 0) return incUp
-    return baseUp
+    const incByType = cloneUpByType(incomingBanner.upByType)
+    if (overrideUp) {
+      // incoming 权威：UP 名单与 upByType 都以 incoming 为准；
+      // incoming 没给 upByType 时保留 base 的，避免把集录池的分类信息抹掉
+      return {
+        up: incUp,
+        upByType: incByType || cloneUpByType(baseBanner.upByType)
+      }
+    }
+    if (fillEmptyUp && !hasUpInfo(baseBanner) && hasUpInfo(incomingBanner)) {
+      return { up: incUp, upByType: incByType }
+    }
+    return { up: baseUp, upByType: cloneUpByType(baseBanner.upByType) }
   }
   const cloneBanner = (b) => ({
     ...b,
@@ -43,9 +96,7 @@ const mergeBanners = (base, incoming, options = {}) => {
     up4: [...(b.up4 || [])],
     upIds: [...(b.upIds || [])],
     candidates: [...(b.candidates || [])],
-    ...(b.upByType
-      ? { upByType: { character: [...(b.upByType.character || [])], weapon: [...(b.upByType.weapon || [])] } }
-      : {})
+    ...(b.upByType ? { upByType: cloneUpByType(b.upByType) } : {})
   })
   const result = base.map(cloneBanner)
   const baseUsed = new Array(result.length).fill(false)
@@ -95,8 +146,9 @@ const mergeBanners = (base, incoming, options = {}) => {
       if (matched >= 0) {
         baseUsed[bi] = true
         incomingUsed[matched] = true
-        const takenUp = takeUpOf(result[bi], incoming[matched])
-        const upChanged = upSetKey({ up: takenUp }) !== upSetKey(result[bi])
+        const taken = takeUpOf(result[bi], incoming[matched])
+        const takenUp = taken.up
+        const upChanged = upFingerprint({ up: takenUp, upByType: taken.upByType }) !== upFingerprint(result[bi])
         const eChanged = overrideTime && endChanged(result[bi].end, incoming[matched].end)
         result[bi] = {
           ...result[bi],
@@ -104,14 +156,7 @@ const mergeBanners = (base, incoming, options = {}) => {
           up: [...takenUp],
           source: upChanged ? (incoming[matched].source || result[bi].source) : result[bi].source,
           confidence: upChanged ? (incoming[matched].confidence || '') : result[bi].confidence,
-          ...(upChanged && incoming[matched].upByType
-            ? {
-                upByType: {
-                  character: [...(incoming[matched].upByType.character || [])],
-                  weapon: [...(incoming[matched].upByType.weapon || [])]
-                }
-              }
-            : {})
+          ...(taken.upByType ? { upByType: taken.upByType } : {})
         }
         if (upChanged || eChanged) {
           updated++
@@ -123,14 +168,38 @@ const mergeBanners = (base, incoming, options = {}) => {
     }
 
     // 3. 剩余按顺序配对
+    // 并行池（同一 channel 同期开多个池）不能纯按下标硬配，
+    // 否则 base 的 A 池可能配到 incoming 的 B 池，导致 UP 名单串池。
+    // 这里按「起始时间相同 → phase 相同 → title 相同」打分择优配对。
     const freeI = iIdx.filter((i) => !incomingUsed[i])
-    for (let k = 0; k < remainingI.length && k < freeI.length; k++) {
-      const bi = remainingI[k]
-      const ii = freeI[k]
+    const scoreOf = (bi, ii) => {
+      const b = result[bi]
+      const c = incoming[ii]
+      let score = 0
+      if (String(b.start || '') === String(c.start || '')) score += 4
+      if (b.phase && c.phase && String(b.phase) === String(c.phase)) score += 2
+      if (b.title && c.title && String(b.title) === String(c.title)) score += 1
+      return score
+    }
+    for (const bi of remainingI) {
+      let best = -1
+      let bestScore = -1
+      for (const ii of freeI) {
+        if (incomingUsed[ii]) continue
+        const score = scoreOf(bi, ii)
+        if (score > bestScore) {
+          bestScore = score
+          best = ii
+        }
+      }
+      // 完全没有可配对的 incoming，跳过（该 base 条目保持原样）
+      if (best < 0) continue
+      const ii = best
       baseUsed[bi] = true
       incomingUsed[ii] = true
-      const takenUp = takeUpOf(result[bi], incoming[ii])
-      const upChanged = upSetKey({ up: takenUp }) !== upSetKey(result[bi])
+      const taken = takeUpOf(result[bi], incoming[ii])
+      const takenUp = taken.up
+      const upChanged = upFingerprint({ up: takenUp, upByType: taken.upByType }) !== upFingerprint(result[bi])
       const eChanged = overrideTime && endChanged(result[bi].end, incoming[ii].end)
       // 保留 base 的 start；end 仅在日期变化时更新；up 依合并策略决定
       result[bi] = {
@@ -139,14 +208,7 @@ const mergeBanners = (base, incoming, options = {}) => {
         up: [...takenUp],
         source: upChanged ? (incoming[ii].source || result[bi].source) : result[bi].source,
         confidence: upChanged ? (incoming[ii].confidence || '') : result[bi].confidence,
-        ...(upChanged && incoming[ii].upByType
-          ? {
-              upByType: {
-                character: [...(incoming[ii].upByType.character || [])],
-                weapon: [...(incoming[ii].upByType.weapon || [])]
-              }
-            }
-          : {})
+        ...(taken.upByType ? { upByType: taken.upByType } : {})
       }
       if (upChanged || eChanged) {
         updated++

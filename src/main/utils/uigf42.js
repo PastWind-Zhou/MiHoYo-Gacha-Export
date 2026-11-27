@@ -67,7 +67,7 @@ const toUIGFRecord = ({ gameId, log, itemId = '' }) => {
   const rec = {
     gacha_id: String(log.gacha_id ?? ''),
     gacha_type: String(log.gacha_type ?? ''),
-    item_id: String(log.item_id ?? itemId ?? ''),
+    item_id: String(log.item_id || itemId || ''),
     count: String(log.count ?? '1'),
     time: String(log.time ?? ''),
     name: String(log.name ?? ''),
@@ -120,7 +120,11 @@ const normalizeUGCAccount = (account) => {
     .sort(sortByRecordId)
   return {
     uid: String(account.uid),
-    timezone: Number.isFinite(Number(account.timezone)) ? Number(account.timezone) : 8,
+    // timezone 缺失 / null / 空串都要回退到默认 +8：
+    // Number(null) 与 Number('') 都是 0 且 finite，直接 Number 会得到 0 时区（伦敦）
+    timezone: (account.timezone === null || account.timezone === undefined || account.timezone === '')
+      ? 8
+      : (Number.isFinite(Number(account.timezone)) ? Number(account.timezone) : 8),
     lang: String(account.lang || 'zh-cn'),
     list
   }

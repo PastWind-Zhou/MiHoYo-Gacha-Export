@@ -111,6 +111,9 @@ let localDataReaded = false
 const readdir = util.promisify(fs.readdir)
 const readData = async (force = false) => {
   if (localDataReaded && !force) return
+  // 必须等配置加载完成：此时 config.game 才是用户实际选择的游戏。
+  // 否则会用默认的 'hkrpg' 去读目录，把别的游戏的记录装进 dataMap。
+  await config.ready
   localDataReaded = true
   const g = game()
   const dataPath = gameDataPath()
@@ -155,6 +158,11 @@ const deleteData = async (uid, action) => {
 }
 
 const changeCurrent = async (uid) => {
+  // 只接受当前游戏、且确实存在于 dataMap 的 uid。
+  // 否则会把别的游戏的 uid 写进 currents[game]，导致
+  // dataMap.get(current) 取到错误游戏的记录。
+  if (uid === undefined || uid === null || uid === '') return
+  if (!dataMap.has(uid)) return
   config.setCurrent(uid)
   await config.save()
 }
@@ -199,6 +207,9 @@ const getLatestUrl = (list) => {
 }
 
 const readLog = async () => {
+  // 日志路径与 API 域名都依赖 config.game，
+  // 必须等配置加载完成，否则会去读默认游戏的日志
+  await config.ready
   const g = game()
   const text = i18n.log
   try {
@@ -398,44 +409,67 @@ const getQuerystring = (url) => {
   return searchParams
 }
 
-const proxyServer = (port) => {
-  return new Promise((rev) => {
-    mitmproxy.createProxy({
-      sslConnectInterceptor: (req, cltSocket, head) => {
-        if (/webstatic([^\.]{2,10})?\.(mihoyo|hoyoverse)\.com/.test(req.url)) {
-          return true
-        }
-      },
-      requestInterceptor: (rOptions, req, res, ssl, next) => {
-        next()
-        if (/webstatic([^\.]{2,10})?\.(mihoyo|hoyoverse)\.com/.test(rOptions.hostname)) {
-          if (/authkey=[^&]+/.test(rOptions.path)) {
-            rev(`${rOptions.protocol}//${rOptions.hostname}${rOptions.path}`)
+// 启动 MITM 代理并等待捕获到带 authkey 的请求 URL
+// 旧实现只有一个 resolve 且永不超时：用户不触发请求时会永久挂起
+const proxyServer = (port, timeout = 120000) => {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let timer = null
+    const finish = (fn, value) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      fn(value)
+    }
+    timer = setTimeout(() => {
+      finish(reject, new Error('proxy-timeout'))
+    }, timeout)
+    try {
+      mitmproxy.createProxy({
+        sslConnectInterceptor: (req, cltSocket, head) => {
+          if (/webstatic([^\.]{2,10})?\.(mihoyo|hoyoverse)\.com/.test(req.url)) {
+            return true
           }
-        }
-      },
-      responseInterceptor: (req, res, proxyReq, proxyRes, ssl, next) => {
-        next()
-      },
-      getPath: () => path.join(userPath, 'node-mitmproxy'),
-      port
-    })
+        },
+        requestInterceptor: (rOptions, req, res, ssl, next) => {
+          next()
+          if (/webstatic([^\.]{2,10})?\.(mihoyo|hoyoverse)\.com/.test(rOptions.hostname)) {
+            if (/authkey=[^&]+/.test(rOptions.path)) {
+              finish(resolve, `${rOptions.protocol}//${rOptions.hostname}${rOptions.path}`)
+            }
+          }
+        },
+        responseInterceptor: (req, res, proxyReq, proxyRes, ssl, next) => {
+          next()
+        },
+        getPath: () => path.join(userPath, 'node-mitmproxy'),
+        port
+      })
+    } catch (e) {
+      finish(reject, e)
+    }
   })
 }
 
-let proxyServerPromise
+// 使用代理抓取 URL
+// 每次都新建代理 Promise：authkey 会过期，复用上一次的 Promise 会拿到旧链接
 const useProxy = async () => {
   const text = i18n.log
   const ip = localIp()
   const port = config.proxyPort
   sendMsg(i18n.parse(text.proxy.hint, { ip, port }))
   await enableProxy('127.0.0.1', port)
-  if (!proxyServerPromise) {
-    proxyServerPromise = proxyServer(port)
+  try {
+    return await proxyServer(port)
+  } catch (e) {
+    if (e && e.message === 'proxy-timeout') {
+      throw new Error('proxy-timeout')
+    }
+    throw e
+  } finally {
+    // 无论成功失败都要关闭系统代理，否则用户网络被劫持
+    await disableProxy()
   }
-  const url = await proxyServerPromise
-  await disableProxy()
-  return url
 }
 
 const tryRequest = async (url, retry = false) => {
@@ -480,8 +514,10 @@ const getApiUrl = async () => {
 
 const fetchData = async (urlOverride) => {
   const text = i18n.log
-  const g = game()
+  // 先读数据（内部会等配置加载完成），再取游戏配置：
+  // game() 依赖 config.game，配置未加载完时拿到的是默认游戏
   await readData()
+  const g = game()
   let url = urlOverride
   if (!url) {
     url = await getUrl()
@@ -575,12 +611,21 @@ const fetchData = async (urlOverride) => {
   await saveData(data)
 }
 
-let proxyStarted = false
+// 代理抓取：用 Promise 记录进行中的请求，既避免并发重复启动代理，
+// 又能在失败后正常重试（旧实现用一次性布尔锁，失败后再也用不了）
+let proxyInFlight = null
 const fetchDataByProxy = async () => {
-  if (proxyStarted) return
-  proxyStarted = true
-  const url = await useProxy()
-  await fetchData(url)
+  if (proxyInFlight) return proxyInFlight
+  proxyInFlight = (async () => {
+    const url = await useProxy()
+    await fetchData(url)
+  })()
+  try {
+    await proxyInFlight
+  } finally {
+    // 无论成功失败都释放，允许用户重试
+    proxyInFlight = null
+  }
 }
 
 ipcMain.handle('FETCH_DATA', async (event, param) => {
@@ -622,6 +667,9 @@ ipcMain.handle('FORCE_READ_DATA', async () => {
 
 ipcMain.handle('SWITCH_GAME', async (event, gameId) => {
   if (!isValidGame(gameId)) return false
+  // 等配置加载完成后再改 game：
+  // 否则这里设置的值会被随后完成的 getLocalConfig() 覆盖回文件里的游戏
+  await config.ready
   if (config.game !== gameId) {
     config.game = gameId
     await config.save()
@@ -636,11 +684,14 @@ ipcMain.handle('SWITCH_GAME', async (event, gameId) => {
   }
 })
 
-ipcMain.handle('CHANGE_UID', (event, uid) => {
-  changeCurrent(uid)
+ipcMain.handle('CHANGE_UID', async (event, uid) => {
+  await config.ready
+  await changeCurrent(uid)
 })
 
-ipcMain.handle('GET_CONFIG', () => {
+ipcMain.handle('GET_CONFIG', async () => {
+  // 渲染层启动时立刻读取配置，必须等加载完成才能给出正确的 game / current
+  await config.ready
   return Object.assign({}, config.value(), {
     current: config.current,
     gameInfo: getGameInfo(config.game, config.lang)
@@ -651,9 +702,11 @@ ipcMain.handle('LANG_MAP', () => {
   return langMap
 })
 
-ipcMain.handle('SAVE_CONFIG', (event, [key, value]) => {
+ipcMain.handle('SAVE_CONFIG', async (event, [key, value]) => {
+  // 等配置加载完成再改并保存，否则会把默认值写回文件，覆盖用户设置
+  await config.ready
   config[key] = value
-  config.save()
+  await config.save()
 })
 
 ipcMain.handle('DISABLE_PROXY', async () => {

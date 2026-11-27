@@ -172,5 +172,16 @@
   "excel.waiwai.deviation2": "2 Fehldraws",
   "excel.waiwai.deviation3": "3 Fehldraws",
   "excel.waiwai.guaranteed": "Garantierte",
-  "excel.waiwai.excludedSuffix": " (nicht berücksichtigt)"
+  "excel.waiwai.excludedSuffix": " (nicht berücksichtigt)",
+  "ui.setting.dataManagerHint": "Unnecessary data can be deleted",
+  "ui.common.data": "Data",
+  "ui.common.dataManage": "Data Management",
+  "ui.common.updateTime": "Update Date",
+  "ui.common.status": "Status",
+  "ui.common.action": "Operation",
+  "ui.common.deleted": "Deleted",
+  "ui.common.normal": "Normal",
+  "ui.common.delete": "Delete",
+  "ui.common.restore": "Restore",
+  "excel.raw.sheet": "Raw Data"
 }

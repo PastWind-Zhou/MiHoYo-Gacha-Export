@@ -96,7 +96,7 @@
 
 <script setup>
 const { ipcRenderer } = require('electron')
-import { reactive, computed, watch, onMounted } from 'vue'
+import { reactive, computed, watch, onMounted, onUnmounted, h } from 'vue'
 import PieChart from './components/PieChart.vue'
 import GachaDetail from './components/GachaDetail.vue'
 import Setting from './components/Setting.vue'
@@ -203,7 +203,9 @@ const hint = computed(() => {
   if (state.status === 'init') {
     return hint.init
   } else if (state.status === 'loaded') {
-    return `${hint.lastUpdate}${colon}${new Date(data.time).toLocaleString()}`
+    // data 可能不存在（抓取到的账号与当前账号不匹配）
+    const time = data && data.time ? new Date(data.time).toLocaleString() : '-'
+    return `${hint.lastUpdate}${colon}${time}`
   } else if (state.status === 'loading') {
     return state.log || 'Loading...'
   } else if (state.status === 'updated') {
@@ -231,6 +233,10 @@ const typeMap = computed(() => {
   return result
 })
 
+// 数据加载的请求序号：快速切换游戏/账号时，
+// 较早发出的请求可能更晚返回，不能让它覆盖更新的状态
+let loadSeq = 0
+
 const applyData = (data) => {
   state.dataMap = data.dataMap
   state.current = data.current
@@ -240,7 +246,10 @@ const applyData = (data) => {
 const fetchData = async (url) => {
   state.log = ''
   state.status = 'loading'
+  const seq = ++loadSeq
   const data = await ipcRenderer.invoke('FETCH_DATA', url)
+  // 已有更新的请求发出，丢弃本次响应
+  if (seq !== loadSeq) return
   if (data) {
     applyData(data)
     state.status = 'loaded'
@@ -251,7 +260,9 @@ const fetchData = async (url) => {
 }
 
 const readData = async (force = false) => {
+  const seq = ++loadSeq
   const data = await ipcRenderer.invoke(force ? 'FORCE_READ_DATA' : 'READ_DATA')
+  if (seq !== loadSeq) return
   if (data) {
     applyData(data)
     if (data.dataMap.get(data.current)) {
@@ -284,7 +295,7 @@ const changeGame = async (gameId) => {
   await getI18nData()
   await updateConfig()
   await loadWaiwai()
-  ipcRenderer.invoke('MAYBE_SYNC_BANNERS').catch(() => {})
+  ipcRenderer.invoke('MAYBE_SYNC_BANNERS', state.game).catch(() => {})
 }
 
 const getI18nData = async () => {
@@ -307,26 +318,37 @@ const exportUIGFJSON = () => {
     uidList.push(item.uid)
   })
 
+  // uid 来自导入文件，内容不可控。
+  // 旧实现把 uid 直接拼进 HTML 字符串并开启 dangerouslyUseHTMLString，
+  // 配合 nodeIntegration:true 等于任意代码执行。
+  // 这里改用 h() 渲染函数构造 VNode，并用受控的选中集合跟踪勾选状态，
+  // 不从 DOM 里反查，避免依赖 Element Plus 的内部结构。
+  const selected = new Set()
+  const message = h('div', uidList.map((uid, index) => {
+    const id = `uigf-uid-${index}`
+    return h('div', [
+      h('input', {
+        type: 'checkbox',
+        id,
+        checked: selected.has(String(uid)),
+        onChange: (e) => {
+          if (e.target.checked) selected.add(String(uid))
+          else selected.delete(String(uid))
+        }
+      }),
+      h('label', { for: id }, String(uid))
+    ])
+  }))
+
   ElMessageBox({
     title: state.i18n.ui.uigf.title,
-    message: `
-      <div>
-        ${uidList.map(uid => `
-          <div>
-            <input type="checkbox" id="${uid}" value="${uid}" />
-            <label for="${uid}">${uid}</label>
-          </div>
-        `).join('')}
-      </div>
-    `,
-    dangerouslyUseHTMLString: true,
+    message,
     showCancelButton: true,
     confirmButtonText: state.i18n.ui.common.ok,
     cancelButtonText: state.i18n.ui.common.cancel,
     beforeClose: (action, instance, done) => {
       if (action === 'confirm') {
-        const selected_uids = uidList.filter(uid => document.getElementById(uid).checked);
-        ipcRenderer.invoke('EXPORT_UIGF_JSON', selected_uids);
+        ipcRenderer.invoke('EXPORT_UIGF_JSON', Array.from(selected));
       }
       done();
     }
@@ -441,30 +463,40 @@ const copyApiUrl = async () => {
   }
 }
 
+// IPC 监听器引用：组件卸载时必须移除，否则会累积并操作已销毁的组件状态
+const ipcHandlers = {
+  LOAD_DATA_STATUS: (event, message) => {
+    state.log = message
+  },
+  ERROR: (event, err) => {
+    console.error(err)
+    ipcRenderer.invoke('LOG_ERROR', err && err.stack ? err.stack : String(err))
+  },
+  UPDATE_HINT: (event, message) => {
+    state.log = message
+    state.status = 'updated'
+  },
+  AUTHKEY_TIMEOUT: (event, message) => {
+    state.authkeyTimeout = message
+  }
+}
+
 onMounted(async () => {
   await updateConfig()
   await readData()
   await getI18nData()
 
-  ipcRenderer.on('LOAD_DATA_STATUS', (event, message) => {
-    state.log = message
-  })
-
-  ipcRenderer.on('ERROR', (event, err) => {
-    console.error(err)
-    ipcRenderer.invoke('LOG_ERROR', err && err.stack ? err.stack : String(err))
-  })
-
-  ipcRenderer.on('UPDATE_HINT', (event, message) => {
-    state.log = message
-    state.status = 'updated'
-  })
-
-  ipcRenderer.on('AUTHKEY_TIMEOUT', (event, message) => {
-    state.authkeyTimeout = message
-  })
+  for (const [channel, handler] of Object.entries(ipcHandlers)) {
+    ipcRenderer.on(channel, handler)
+  }
 
   // 按设置中的间隔自动同步卡池数据（失败不影响其它功能）
-  ipcRenderer.invoke('MAYBE_SYNC_BANNERS').catch(() => {})
+  ipcRenderer.invoke('MAYBE_SYNC_BANNERS', state.game).catch(() => {})
+})
+
+onUnmounted(() => {
+  for (const [channel, handler] of Object.entries(ipcHandlers)) {
+    ipcRenderer.removeListener(channel, handler)
+  }
 })
 </script>

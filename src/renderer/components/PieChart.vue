@@ -5,7 +5,7 @@
 </template>
 
 <script setup>
-import { reactive, computed, ref, onMounted, onUpdated } from "vue";
+import { reactive, computed, ref, onMounted, onUpdated, onUnmounted } from "vue";
 import { use, init } from "echarts/core";
 import {
   TitleComponent,
@@ -15,6 +15,7 @@ import {
 import { PieChart } from "echarts/charts";
 import { CanvasRenderer } from "echarts/renderers";
 import throttle from "lodash-es/throttle";
+import { canResize } from '@renderer/chartResize.cjs';
 
 use([
   TitleComponent,
@@ -33,6 +34,12 @@ const props = defineProps({
 
 const chart = ref(null);
 
+// ECharts 内置了对容器的 ResizeObserver：
+// 容器从 display:none 恢复显示时，它会在尺寸仍为 0 的瞬间把 canvas 缩成 0×0
+// 并清空内容；之后容器尺寸不再变化，于是没有人来补救 —— 图表就一直空白。
+// 这里自己观察容器尺寸，一旦恢复为可见尺寸就重新 resize。
+let resizeObserver = null;
+
 // 绝区零有邦布分类，图例与配色与原版绝区零工具一致
 const hasBangboo = () => !!(props.gameInfo && props.gameInfo.bangboo);
 
@@ -40,7 +47,8 @@ const colors = ["#fac858", "#ee6666", "#5470c6", "#91cc75", "#73c0de"];
 const bangColors = ["#fac858", "#fac858", "#ee6666", "#5470c6", "#5470c6", "#91cc75", "#73c0de"];
 
 const parseData = (detail, type) => {
-  const text = props.i18n.ui.data;
+  // i18n 未加载完成时 props.i18n 可能为 null，直接访问会抛错并中断渲染
+  const text = props.i18n?.ui?.data || {};
   // 最低档（星铁/原神 3 星、绝区零 B 级）不参与饼图统计
   const keys = hasBangboo()
     ? [
@@ -78,7 +86,7 @@ const updateChart = throttle(() => {
     pieChart = init(chart.value);
   }
 
-  const colon = props.i18n.symbol.colon;
+  const colon = props.i18n?.symbol?.colon || ':';
   const result = parseData(props.data[1], props.data[0]);
 
   const option = {
@@ -118,7 +126,11 @@ const updateChart = throttle(() => {
   };
 
   pieChart.setOption(option);
-  pieChart.resize();
+  // 容器不可见时不要 resize：此时 ECharts 会把 canvas 缩成 0×0 并清空内容，
+  // 反而弄巧成拙。恢复可见后由 ResizeObserver 补做 resize。
+  if (canResize(pieChart, chart.value)) {
+    pieChart.resize();
+  }
 }, 1000);
 
 onUpdated(() => {
@@ -128,5 +140,35 @@ onUpdated(() => {
 onMounted(() => {
   updateChart();
   window.addEventListener("resize", updateChart);
+
+  // 监听容器尺寸：隐藏→显示 时 ECharts 已把 canvas 清空，这里补一次 resize。
+  // 用 requestAnimationFrame 打断，避免与 ECharts 内部的观察器形成回调循环。
+  if (typeof ResizeObserver !== "undefined" && chart.value) {
+    resizeObserver = new ResizeObserver(() => {
+      if (!canResize(pieChart, chart.value)) return;
+      requestAnimationFrame(() => {
+        if (canResize(pieChart, chart.value)) {
+          pieChart.resize();
+        }
+      });
+    });
+    resizeObserver.observe(chart.value);
+  }
+});
+
+// 卸载时必须移除监听并释放 ECharts 实例：
+// 否则切换游戏/账号时实例会不断累积，且 throttle 的尾部调用
+// 可能在卸载后访问已失效的组件状态
+onUnmounted(() => {
+  window.removeEventListener("resize", updateChart);
+  updateChart.cancel();
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
+  }
+  if (pieChart) {
+    pieChart.dispose();
+    pieChart = null;
+  }
 });
 </script>

@@ -206,5 +206,6 @@
   "excel.waiwai.deviation2": "เสีย 2 ครั้ง",
   "excel.waiwai.deviation3": "เสีย 3 ครั้ง",
   "excel.waiwai.guaranteed": "จำนวนที่การันตี",
-  "excel.waiwai.excludedSuffix": " (ไม่นับในสถิติ)"
+  "excel.waiwai.excludedSuffix": " (ไม่นับในสถิติ)",
+  "excel.raw.sheet": "Raw Data"
 }

@@ -206,5 +206,6 @@
   "excel.waiwai.deviation2": "2 промаха",
   "excel.waiwai.deviation3": "3 промаха",
   "excel.waiwai.guaranteed": "Кол-во гарантированных",
-  "excel.waiwai.excludedSuffix": " (не учитывается)"
+  "excel.waiwai.excludedSuffix": " (не учитывается)",
+  "excel.raw.sheet": "Raw Data"
 }

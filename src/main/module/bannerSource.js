@@ -36,9 +36,43 @@ const fetchText = async (url, headers = {}) => {
     timeout: 30000
   })
   if (!res.ok) throw new Error('HTTP ' + res.status)
-  const text = await res.text()
-  if (text.length > MAX_REMOTE_BYTES) throw new Error('response too large')
+  // 流式读取并在超限时中断：先读完再判断长度的话，
+  // 超大响应已经占满内存，8MB 上限形同虚设
+  const reader = res.body && res.body.getReader ? res.body.getReader() : null
+  if (!reader) {
+    const text = await res.text()
+    if (text.length > MAX_REMOTE_BYTES) throw new Error('response too large')
+    return text
+  }
+  const decoder = new TextDecoder('utf-8')
+  let text = ''
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      text += decoder.decode(value, { stream: true })
+      if (text.length > MAX_REMOTE_BYTES) {
+        try { await reader.cancel() } catch (e) {}
+        throw new Error('response too large')
+      }
+    }
+    text += decoder.decode()
+  } finally {
+    try { reader.releaseLock && reader.releaseLock() } catch (e) {}
+  }
   return text
+}
+
+// 校验上游返回的卡池结构：只检查 banners 是数组不够，
+// 元素结构变了也要能触发降级链
+const isValidBannerSet = (data) => {
+  if (!data || !Array.isArray(data.banners)) return false
+  if (!data.banners.length) return false
+  return data.banners.every((b) => {
+    if (!b || typeof b !== 'object') return false
+    return typeof b.channel === 'string' && b.channel.length > 0 &&
+      typeof b.start === 'string' && typeof b.end === 'string'
+  })
 }
 
 // 主源：拉取 hoyo-gacha 的卡池 JSON
@@ -47,7 +81,7 @@ const fetchFromUpstream = async (game) => {
   if (!src) throw new Error('no upstream source for ' + game)
   const text = await fetchText(src.url)
   const data = JSON.parse(text)
-  if (!data || !Array.isArray(data.banners)) throw new Error('invalid upstream format')
+  if (!isValidBannerSet(data)) throw new Error('invalid upstream format')
   return data
 }
 

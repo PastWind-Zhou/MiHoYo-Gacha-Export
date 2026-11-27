@@ -197,5 +197,6 @@
   "ui.banner.channelWeapon": "Weapon",
   "ui.banner.channelLightcone": "Light cone",
   "ui.banner.channelEngine": "W-Engine",
-  "ui.banner.channelJilu": "Chronicled"
+  "ui.banner.channelJilu": "Chronicled",
+  "excel.raw.sheet": "Raw Data"
 }

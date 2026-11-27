@@ -24,7 +24,22 @@ if (process.env.BUILD_TARGET === 'web') web()
 else unionBuild()
 
 function clean() {
-    sync(['dist/electron/main/*', 'dist/electron/renderer/*', 'dist/web/*', 'build/*', '!build/icons', '!build/lib', '!build/lib/electron-build.*', '!build/icons/icon.*'])
+    // 注意：build/* 会递归删除 build 下的所有内容，
+    // 其中包含 <productName>-<version>/userData —— 那是用户的抽卡记录。
+    // 必须显式排除，否则每次 build 都会把用户数据删掉。
+    sync([
+        'dist/electron/main/*',
+        'dist/electron/renderer/*',
+        'dist/web/*',
+        'build/*',
+        '!build/icons',
+        '!build/lib',
+        '!build/lib/electron-build.*',
+        '!build/icons/icon.*',
+        // 保留各版本目录下的用户数据
+        '!build/*/userData',
+        '!build/*/userData/**'
+    ])
     console.log(`\n${doneLog}clear done`)
     if (process.env.BUILD_TARGET === 'onlyClean') process.exit()
 }
@@ -76,6 +91,9 @@ function unionBuild() {
 // i18n 按游戏分目录在运行时读取，需要随主进程一起复制到 dist
 function copyI18n() {
     try {
+        // 先清空目标目录：否则 src/i18n 中删除的语言文件会残留在 dist 里，
+        // 并被打进发布包（build-main-only / build-renderer-only 都是先清空再复制）
+        fs.emptyDirSync(path.resolve('dist/electron/i18n'))
         fs.copySync(path.resolve('src/i18n'), path.resolve('dist/electron/i18n'))
         console.log(`${okayLog}i18n copied to dist/electron/i18n`)
     } catch (e) {

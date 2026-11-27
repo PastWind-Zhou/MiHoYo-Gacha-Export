@@ -8,10 +8,12 @@ const windowStateKeeper = require('electron-window-state')
 const debounce = require('lodash/debounce')
 const { glob } = require('glob')
 
-const { isDev, appRoot, userDataPath } = require('./paths')
+const { isDev, appRoot, userDataPath, migrateUserData } = require('./paths')
 
 const userPath = app.getPath('userData')
-// const globalUserDataPath = path.resolve(userPath, 'userData')
+
+// 打包版升级到新目录时，把旧版本目录里的抽卡记录迁移过来（只在当前目录无数据时执行）
+migrateUserData()
 
 let win = null
 const initWindow = () => {
@@ -56,7 +58,9 @@ const saveLog = () => {
     const text = item[2]
     return `[${type}][${time}]${text}`
   }).join('\r\n')
-  fs.outputFile(path.join(userDataPath, 'log.txt'), text)
+  // 写入失败（如目录不可写）不能产生 unhandled rejection，
+  // 否则日志写入本身会变成新的崩溃源
+  return fs.outputFile(path.join(userDataPath, 'log.txt'), text).catch(() => {})
 }
 
 const authkeyMask = (text = '') => {
@@ -142,13 +146,22 @@ const detectLocale = (value) => {
   return result
 }
 
-const saveJSON = async (name, data) => {
-  try {
-    await fs.outputJSON(path.join(userDataPath, name), data)
-  } catch (e) {
-    sendMsg(e, 'ERROR')
-    await sleep(3)
+// 保存 JSON 到 userData 目录
+// 写入失败时重试若干次，并把结果返回给调用方：
+// 静默失败会让调用方以为已保存，实际数据已丢失
+const saveJSON = async (name, data, retry = 3) => {
+  let lastError = null
+  for (let i = 0; i < Math.max(1, retry); i++) {
+    try {
+      await fs.outputJSON(path.join(userDataPath, name), data)
+      return true
+    } catch (e) {
+      lastError = e
+      if (i < retry - 1) await sleep(200)
+    }
   }
+  sendMsg(lastError, 'ERROR')
+  return false
 }
 
 const readJSON = async (dataPath, name) => {
@@ -208,6 +221,9 @@ async function getCacheText(gamePath) {
   const timeSortedFiles = results
     .sort((a, b) => b.mtimeMs - a.mtimeMs)
     .map(path => path.fullpath())
+  // 没匹配到缓存文件时返回空值，由调用方给出准确提示，
+  // 否则 path.join(undefined) 会抛 TypeError 并被误报成「日志读取失败」
+  if (!timeSortedFiles.length) return ['', '']
   const cacheText = await fs.readFile(path.join(timeSortedFiles[0]), 'utf8')
 
   return [cacheText, timeSortedFiles[0]]

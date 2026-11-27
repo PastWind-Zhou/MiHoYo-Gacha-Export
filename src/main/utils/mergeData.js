@@ -1,30 +1,42 @@
 // 记录标识：优先用 id；旧版数据没有 id 时退化为「时间+名称+类型」
 const tnOf = (item) => `${item.time || ''}|${item.name || ''}|${item.item_type || ''}`
 
+// 记录 id 可能是脏数据（非纯数字，v3.0 导入甚至完全没有 id），
+// 排序时必须容错，否则一次脏数据就会让整个导入流程抛错
+const toBigInt = (value) => {
+  try {
+    return BigInt(String(value ?? '').trim() || '0')
+  } catch (e) {
+    return 0n
+  }
+}
+
 const mergeList = (a, b) => {
   if (!a || !a.length) return b || []
   if (!b || !b.length) return a
   const list = [...b, ...a]
-  // 没有 id 的旧记录（老版本原神数据），按「时间+名称+类型」标识
-  const legacyKeys = new Set()
+  // 同一条记录可能两种形态并存：带 id 的新记录 + 不带 id 的旧记录。
+  // 带 id 的记录信息更完整（可导出、可排序），因此保留带 id 的那条。
+  const idKeys = new Set()
   list.forEach(item => {
-    if (!item.id) legacyKeys.add(tnOf(item))
+    if (item.id) idKeys.add(tnOf(item))
   })
   const seen = new Set()
   const result = []
   list.forEach(item => {
     const key = item.id ? `id:${item.id}` : `tn:${tnOf(item)}`
     if (seen.has(key)) return
-    // 新拉取的记录与旧记录内容相同时，只保留一条
-    if (item.id && legacyKeys.has(tnOf(item))) return
+    // 不带 id 的旧记录，若同内容已有带 id 的记录，则丢弃旧的那条
+    if (!item.id && idKeys.has(tnOf(item))) return
     seen.add(key)
     result.push(item)
   })
   return result.sort((m, n) => {
-    const num = BigInt(m.id) - BigInt(n.id)
-    if (num > 0) {
+    const mv = toBigInt(m.id)
+    const nv = toBigInt(n.id)
+    if (mv > nv) {
       return 1
-    } else if (num < 0) {
+    } else if (mv < nv) {
       return -1
     }
     return 0
@@ -38,9 +50,17 @@ const mergeData = (local, origin) => {
     const originUid = origin.uid
     if (localUid !== originUid) return origin.result
     const originResult = new Map()
-    for (let [key, value] of origin.result) {
-      const newVal = mergeList(localResult.get(key), value)
-      originResult.set(key, newVal)
+    // 取两侧池键的并集：只遍历 origin 会把本地独有的池静默丢掉
+    const keys = new Set([...origin.result.keys(), ...localResult.keys()])
+    for (const key of keys) {
+      const originValue = origin.result.get(key)
+      const localValue = localResult.get(key)
+      // 本地独有的池：原样保留
+      if (originValue === undefined) {
+        if (localValue !== undefined) originResult.set(key, localValue)
+        continue
+      }
+      originResult.set(key, mergeList(localValue, originValue))
     }
     return originResult
   }

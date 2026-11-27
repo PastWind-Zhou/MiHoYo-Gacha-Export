@@ -9,6 +9,8 @@ const { games, getGachaTypes, getGameInfo } = require('./games')
 const { getLocalBanners } = require('./gachaBanner')
 const { buildWaiwaiStats, buildWaiwaiRows } = require('./utils/waiwaiStats')
 const { addWaiwaiSheet } = require('./utils/excelWaiwai')
+const { addRawSheet } = require('./utils/excelRaw')
+const { sendMsg } = require('./utils')
 
 function pad(num) {
   return `${num}`.padStart(2, "0");
@@ -25,41 +27,23 @@ function getTimeString() {
   return `${YYYY}${MM}${DD}_${HH}${mm}${ss}`;
 }
 
-const addRawSheet = (workbook, data) => {  const sheet = workbook.addWorksheet('rawData', {views: [{state: 'frozen', ySplit: 1}]})
-  const excelKeys = ['gacha_id', 'gacha_type', 'id', 'item_id', 'item_type', 'lang', 'name', 'rank_type', 'time', 'uid']
-  sheet.columns = excelKeys.map((key, index) => {
-    return {
-      header: key,
-      key,
-    }
-  })
-  const temp = []
-  for (let [key, value] of data.result) {
-    for (let log of value){
-      const arr = []
-      arr.push(log.gacha_id || '')
-      arr.push(log.gacha_type)
-      arr.push(log.id)
-      arr.push(log.item_id || '')
-      arr.push(log.item_type)
-      arr.push(data.lang)
-      arr.push(log.name)
-      arr.push(log.rank_type)
-      arr.push(log.time)
-      arr.push(data.uid)
-      temp.push(arr)
-    }
-  }
-  sheet.addRows(temp)
-}
+// 原始数据表：见 utils/excelRaw.js
 
 // 歪率分析工作表：见 utils/excelWaiwai.js
 
 const start = async () => {
+  // 等配置加载完成：config.game 决定导出哪个游戏的数据，
+  // 未加载完时会导出默认游戏的错误数据
+  await config.ready
   const g = games[config.game]
   const { header, customFont, filePrefix, fileType } = i18n.excel
   const { dataMap, current } = getData()
   const data = dataMap.get(current)
+  // 当前账号没有数据时直接提示，避免后续取 data.lang 抛错导致导出无响应
+  if (!data || !data.result || !data.result.size) {
+    sendMsg(i18n.ui?.waiwai?.noData || '暂无数据可导出', 'ERROR')
+    return
+  }
   const typeList = getGachaTypes(config.game, data.lang)
   const gameInfo = getGameInfo(config.game, data.lang)
   // 星级文案按游戏取（星铁/原神 3-4-5 星，绝区零 B-A-S 级）
@@ -159,7 +143,10 @@ const start = async () => {
 
   // 歪率分析工作表（统计失败不影响其它工作表）
   try {
-    const banners = await getLocalBanners(config.game)
+    // getLocalBanners 返回的是 { source, updated, banners } 结构，
+    // 判定引擎需要的是 banners 数组本身
+    const bannerSet = await getLocalBanners(config.game)
+    const banners = Array.isArray(bannerSet) ? bannerSet : (bannerSet?.banners || [])
     const waiwai = buildWaiwaiStats({ game: config.game, result: data.result, banners, types: typeList })
     if (waiwai.pools.length) {
       const w = i18n.excel.waiwai
@@ -174,7 +161,7 @@ const start = async () => {
     console.error('add waiwai sheet failed', e)
   }
 
-  addRawSheet(workbook, data)
+  addRawSheet(workbook, data, i18n.excel?.raw?.sheet || '原始数据')
 
   const buffer = await workbook.xlsx.writeBuffer()
   const filePath = dialog.showSaveDialogSync({
@@ -192,3 +179,6 @@ const start = async () => {
 ipcMain.handle('SAVE_EXCEL', async () => {
   await start()
 })
+
+// 导出供测试与复用
+module.exports = { start, addRawSheet }

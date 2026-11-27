@@ -10,7 +10,10 @@ const { games } = require('../games')
 const parseLocal = (s) => {
   if (!s) return NaN
   const t = String(s).trim().replace(' ', 'T')
-  const d = new Date(/[Zz]|[+-]\d\d:?\d\d$/.test(t) ? t : t + '+08:00')
+  // 只在结尾出现 Z 或 ±HH:MM 时才认为已带时区，
+  // 否则字符串中间出现 z/Z 会被误判为已带时区而漏加 +08:00
+  const hasZone = /(?:Z|[+-]\d\d:?\d\d)$/i.test(t)
+  const d = new Date(hasZone ? t : t + '+08:00')
   return d.getTime()
 }
 
@@ -36,8 +39,11 @@ const nameKeys = (s) => {
 // 查询某时刻某 channel 开放的卡池（并行池会返回多个）
 const bannersAt = (banners, channel, timeMs) => {
   const out = []
-  for (const b of banners || []) {
-    if (b.channel !== channel) continue
+  // 只接受数组：调用方若误传了 { source, banners } 这类对象，
+  // 会在 for...of 处抛 TypeError，导致整个统计流程失败
+  const list = Array.isArray(banners) ? banners : []
+  for (const b of list) {
+    if (!b || b.channel !== channel) continue
     const s = parseLocal(b.start)
     const e = parseLocal(b.end)
     if (!e) continue
@@ -58,11 +64,13 @@ const isUpAt = (banners, channel, name, timeMs, itemType) => {
   let hasUsable = false
   for (const b of active) {
     // 混合池（原神集录祈愿）：角色与武器的 UP 名单分开，按记录类型取用
+    // 记录里的 item_type 随游戏语言变化，必须同时识别中英文与各地区译名，
+    // 否则英文 locale 下混合池会全部退化为「不可判定」
     let list = b.up || []
     if (b.upByType && itemType) {
       const t = String(itemType)
-      if (/角色|代理/.test(t)) list = b.upByType.character || []
-      else if (/武器|光锥|音擎/.test(t)) list = b.upByType.weapon || []
+      if (/角色|代理|character|personaje|personnages|charakter|perso|角色|캐릭터|キャラ/i.test(t)) list = b.upByType.character || []
+      else if (/武器|光锥|音擎|weapon|light\s*cone|lightcone|w-?engine|engine|arma|arme|武器|waffe|무기|라이콘|エンジン|武器/i.test(t)) list = b.upByType.weapon || []
     }
     if (!list.length) continue
     hasUsable = true
@@ -88,9 +96,11 @@ const isUpAt = (banners, channel, name, timeMs, itemType) => {
 // 返回每条记录的标记：{ index, top, up, known, fallback, ...原始字段 }
 const judgePool = ({ records = [], banners = [], channel = '', topRank = '5', fallback = false }) => {
   const top = String(topRank)
-  const sorted = records.slice().sort((a, b) => (parseLocal(a.time) || 0) - (parseLocal(b.time) || 0))
+  // banners 只接受数组，误传对象时退化为空数组而不是抛错
+  const bannerList = Array.isArray(banners) ? banners : []
+  const sorted = (Array.isArray(records) ? records : []).slice().sort((a, b) => (parseLocal(a.time) || 0) - (parseLocal(b.time) || 0))
   const marked = sorted.map((rec, index) => {
-    const res = isUpAt(banners, channel, rec.name, parseLocal(rec.time), rec.item_type)
+    const res = isUpAt(bannerList, channel, rec.name, parseLocal(rec.time), rec.item_type)
     return {
       index,
       id: rec.id,
@@ -167,8 +177,22 @@ const calcPoolStats = (marked, { topRank = '5' } = {}) => {
   })
 
   // 连续歪的次数分布（不可判定记录会打断连续性）
+  // 注意：必须基于完整的 tops 序列统计，不能先过滤掉 unknown，
+  // 否则被不可判定记录隔开的两条歪会被误算成「连续歪 2 次」，歪串分布虚高。
   let streak = 0
-  knownTops.forEach((m) => {
+  tops.forEach((m) => {
+    // 不可判定记录：打断连续性，但不计入分布
+    if (!m.known) {
+      if (streak > 0) deviationHistogram[streak] = (deviationHistogram[streak] || 0) + 1
+      streak = 0
+      return
+    }
+    // 兜底判定不进入严格指标，同样打断连续性
+    if (m.fallback) {
+      if (streak > 0) deviationHistogram[streak] = (deviationHistogram[streak] || 0) + 1
+      streak = 0
+      return
+    }
     if (!m.up) {
       streak++
     } else if (streak > 0) {
@@ -196,8 +220,9 @@ const calcPoolStats = (marked, { topRank = '5' } = {}) => {
     noDeviationRate: upTops.length ? round(noDeviationCount / upTops.length) : 0,
     avgUpPulls: round(avg(upGaps)),
     avgTopPulls: round(avg(topGaps)),
-    minTopPulls: topGaps.length ? Math.min(...topGaps) : 0,
-    maxTopPulls: topGaps.length ? Math.max(...topGaps) : 0,
+    // 只有 1 条五星记录时不存在「间隔」，返回 null 表示无数据（0 会被误解为间隔 0 抽）
+    minTopPulls: topGaps.length ? Math.min(...topGaps) : null,
+    maxTopPulls: topGaps.length ? Math.max(...topGaps) : null,
     upHitRate: knownTops.length ? round(upTops.length / knownTops.length) : 0,
     deviationHistogram,
     guaranteedCount
@@ -215,19 +240,32 @@ const analyzePool = ({ game, poolKey, records = [], banners = [], topRank, fallb
   return { channel, topRank: rank, excluded, marked, stats }
 }
 
-// ---------- 集录祈愿开始时间补齐 ----------
-// 「集录祈愿」与同版本同相位的角色池同期开放，其 wiki 上的起始时间是
-// 「X版本更新后」这类文字描述，无法直接解析。
-// 这里用内置角色池的同期开始时间补齐（内置数据的上游推定更准）。
-const fillJiluStarts = (banners) => {
-  const charPools = (banners || []).filter((b) => b.channel === 'character')
-  return (banners || []).map((b) => {
-    if (b.channel !== 'jilu' || b.start) return b
+// ---------- 集录祈愿时间对齐 ----------
+// 「集录祈愿」与同期的角色活动祈愿（UP 池）同期开放，但它的时间在 wiki 上是
+// 「X版本更新后」这类文字描述，独立维护后常与角色池对不上
+// （例如 5.9「月之一」记为 09-10 06:00，实际角色池是 09-09 15:00）。
+// 时间不一致会让落在差值区间里的记录被判成「不可判定」。
+//
+// 因此统一以同期 UP 池的时间为准：start 与 end 都对齐。
+// 匹配规则：先取「同版本 + 同相位」的角色池，取不到则放宽到「同版本」。
+// 候选有多个（并行池）时取开始时间最早的那个。
+const alignJiluTimes = (banners) => {
+  const list = Array.isArray(banners) ? banners : []
+  const charPools = list.filter((b) => b && b.channel === 'character')
+  return list.map((b) => {
+    if (!b || b.channel !== 'jilu') return b
+    // 手动修正 / 远程拉取的数据优先于内置对齐结果
+    if (b.source === 'manual' || b.source === 'remote') return b
     const same = charPools.filter((c) => c.version === b.version && (!b.phase || c.phase === b.phase))
     const pool = same.length ? same : charPools.filter((c) => c.version === b.version)
     if (!pool.length) return b
-    const start = pool.map((c) => c.start).filter(Boolean).sort()[0]
-    return start ? { ...b, start } : b
+    // 并行池时以最早开放的那个为准
+    const target = pool
+      .filter((c) => c.start && c.end)
+      .sort((x, y) => (parseLocal(x.start) || 0) - (parseLocal(y.start) || 0))[0]
+    if (!target) return b
+    if (b.start === target.start && b.end === target.end) return b
+    return { ...b, start: target.start, end: target.end }
   })
 }
 
@@ -240,5 +278,5 @@ module.exports = {
   judgePool,
   calcPoolStats,
   analyzePool,
-  fillJiluStarts
+  alignJiluTimes
 }

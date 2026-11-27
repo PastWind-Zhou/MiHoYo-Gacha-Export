@@ -123,9 +123,11 @@ function startElectron() {
     ]
 
     // detect yarn or npm and process commandline args accordingly
-    if (process.env.npm_execpath.endsWith('yarn.js')) {
+    // 直接用 node 启动时 npm_execpath 可能为空，需要判空
+    const execPath = process.env.npm_execpath || ''
+    if (execPath.endsWith('yarn.js')) {
         args = args.concat(process.argv.slice(3))
-    } else if (process.env.npm_execpath.endsWith('npm-cli.js')) {
+    } else if (execPath.endsWith('npm-cli.js')) {
         args = args.concat(process.argv.slice(2))
     }
 

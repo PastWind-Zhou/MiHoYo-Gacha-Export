@@ -125,20 +125,29 @@ const inferGame = ({ game, pools = [], banners = [] }) => {
   if (!g) return { inferred: [], pending: [] }
   const inferred = []
   const pending = []
-  ;(pools || []).forEach(({ poolKey, records }) => {
-    const key = String(poolKey)
+  // 先按 channel 聚合记录：
+  // 原神 400 与 301 都映射到 character（共用保底），若分池各自反推，
+  // 会对同一 channel 生成区间重叠、UP 冲突的两条条目。
+  const byChannel = new Map()
+  ;(pools || []).forEach((pool) => {
+    if (!pool) return
+    const key = String(pool.poolKey)
     if (Array.isArray(g.noDeviationPools) && g.noDeviationPools.includes(key)) return
     const channel = g.poolChannel?.[key] || ''
     if (!channel) return
+    if (!byChannel.has(channel)) byChannel.set(channel, [])
+    byChannel.get(channel).push(...(Array.isArray(pool.records) ? pool.records : []))
+  })
+  for (const [channel, records] of byChannel) {
     const res = inferPool({
-      records: records || [],
+      records,
       banners,
       channel,
       topRank: g.ranks?.top || '5'
     })
     inferred.push(...res.inferred)
     pending.push(...res.pending)
-  })
+  }
   return { inferred, pending }
 }
 

@@ -1,4 +1,4 @@
-const { judgePool, calcPoolStats, isUpAt, analyzePool, parseLocal } = require('./bannerJudge')
+const { judgePool, calcPoolStats, isUpAt, analyzePool, parseLocal, bannersAt, alignJiluTimes } = require('./bannerJudge')
 
 const rec = (time, name, { rank = '5', itemType = '角色', id = '' } = {}) => ({
   id,
@@ -268,5 +268,126 @@ describe('按游戏配置分析（analyzePool）', () => {
     const r = analyzePool({ game: 'nap', poolKey: '5', records: [], banners: [] })
     expect(r.channel).toBe('')
     expect(r.excluded).toBe(true)
+  })
+})
+
+describe('异常输入防御', () => {
+  // 回归：调用方误传 { source, banners } 这类对象时，
+  // 曾导致 bannersAt 抛 TypeError，整个歪率统计流程失败
+  test('banners 传入对象时不抛错（而非 TypeError）', () => {
+    expect(() => bannersAt({ banners: [] }, 'character', 0)).not.toThrow()
+    expect(bannersAt({ banners: [] }, 'character', 0)).toEqual([])
+  })
+
+  test('judgePool 的 banners 传入对象时不抛错', () => {
+    const marked = judgePool({
+      records: [rec('2024-01-05 12:00:00', '艾莲')],
+      banners: { banners: [] },
+      channel: 'character',
+      topRank: '5'
+    })
+    expect(marked).toHaveLength(1)
+    expect(marked[0].known).toBe(false)
+  })
+
+  test('analyzePool 的 banners 传入对象时不抛错', () => {
+    const r = analyzePool({
+      game: 'hkrpg',
+      poolKey: '11',
+      records: [rec('2024-01-05 12:00:00', '艾莲')],
+      banners: { banners: [] }
+    })
+    expect(r.stats.unknownCount).toBe(1)
+  })
+
+  test('alignJiluTimes 传入对象时不抛错', () => {
+    expect(() => alignJiluTimes({ banners: [] })).not.toThrow()
+    expect(alignJiluTimes({ banners: [] })).toEqual([])
+  })
+
+  test('alignJiluTimes 传入正常数组时行为不变', () => {
+    const input = [
+      { channel: 'character', version: '4.5', phase: '上半', start: '2024-03-12 15:00:00', end: '2024-04-02 17:59:00' },
+      { channel: 'jilu', version: '4.5', phase: '上半', start: '', end: '2024-04-02 17:59:00' }
+    ]
+    const out = alignJiluTimes(input)
+    expect(out[1].start).toBe('2024-03-12 15:00:00')
+  })
+})
+
+describe('集录祈愿时间对齐（alignJiluTimes）', () => {
+  const charPool = {
+    channel: 'character', version: '5.9', phase: '上半',
+    start: '2025-09-09 15:00:00', end: '2025-09-30 17:59:59'
+  }
+
+  // 回归：集录池时间与同期 UP 池不一致时，以 UP 池为准
+  test('时间不一致时以同期 UP 池的 start 与 end 为准', () => {
+    const input = [
+      charPool,
+      {
+        channel: 'jilu', version: '5.9', phase: '上半', title: '露草的行盏',
+        start: '2025-09-10 06:00:00', end: '2025-09-30 17:59:00'
+      }
+    ]
+    const out = alignJiluTimes(input)
+    expect(out[1].start).toBe('2025-09-09 15:00:00')
+    expect(out[1].end).toBe('2025-09-30 17:59:59')
+  })
+
+  test('时间缺失时也会补齐', () => {
+    const input = [
+      charPool,
+      { channel: 'jilu', version: '5.9', phase: '上半', title: '露草的行盏', start: '', end: '' }
+    ]
+    const out = alignJiluTimes(input)
+    expect(out[1].start).toBe('2025-09-09 15:00:00')
+    expect(out[1].end).toBe('2025-09-30 17:59:59')
+  })
+
+  test('同相位找不到时放宽到同版本', () => {
+    const input = [
+      { ...charPool, phase: '下半' },
+      { channel: 'jilu', version: '5.9', phase: '上半', title: 'X', start: '2025-09-10 06:00:00', end: '' }
+    ]
+    const out = alignJiluTimes(input)
+    expect(out[1].start).toBe('2025-09-09 15:00:00')
+  })
+
+  test('并行池时取开始时间最早的那个', () => {
+    const input = [
+      { ...charPool, start: '2025-09-09 15:00:00', end: '2025-09-30 17:59:59' },
+      { ...charPool, title: '另一个并行池', start: '2025-09-09 15:00:00', end: '2025-09-30 17:59:59' },
+      { channel: 'jilu', version: '5.9', phase: '上半', title: 'X', start: '2025-09-10 06:00:00', end: '' }
+    ]
+    const out = alignJiluTimes(input)
+    expect(out[2].start).toBe('2025-09-09 15:00:00')
+  })
+
+  test('找不到同期角色池时保持原样', () => {
+    const jilu = { channel: 'jilu', version: '9.9', phase: '上半', title: 'X', start: '2025-09-10 06:00:00', end: '2025-09-30 17:59:00' }
+    const out = alignJiluTimes([charPool, jilu])
+    expect(out[1].start).toBe('2025-09-10 06:00:00')
+    expect(out[1].end).toBe('2025-09-30 17:59:00')
+  })
+
+  test('手动修正 / 远程数据的集录池不被覆盖', () => {
+    const input = [
+      charPool,
+      { channel: 'jilu', version: '5.9', phase: '上半', title: '手动', source: 'manual', start: '2025-09-01 00:00:00', end: '2025-10-01 00:00:00' },
+      { channel: 'jilu', version: '5.9', phase: '上半', title: '远程', source: 'remote', start: '2025-09-02 00:00:00', end: '2025-10-02 00:00:00' }
+    ]
+    const out = alignJiluTimes(input)
+    expect(out[1].start).toBe('2025-09-01 00:00:00')
+    expect(out[2].start).toBe('2025-09-02 00:00:00')
+  })
+
+  test('非 jilu 渠道不受影响', () => {
+    const input = [
+      charPool,
+      { channel: 'weapon', version: '5.9', phase: '上半', start: '2025-09-08 15:00:00', end: '2025-09-29 17:59:59' }
+    ]
+    const out = alignJiluTimes(input)
+    expect(out[1].start).toBe('2025-09-08 15:00:00')
   })
 })

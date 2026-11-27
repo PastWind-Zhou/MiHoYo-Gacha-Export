@@ -206,5 +206,6 @@
   "excel.waiwai.deviation2": "2회 경사",
   "excel.waiwai.deviation3": "3회 경사",
   "excel.waiwai.guaranteed": "확정 횟수",
-  "excel.waiwai.excludedSuffix": " (통계 제외)"
+  "excel.waiwai.excludedSuffix": " (통계 제외)",
+  "excel.raw.sheet": "Raw Data"
 }

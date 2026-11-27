@@ -188,5 +188,16 @@
   "excel.waiwai.deviation2": "2 промаха",
   "excel.waiwai.deviation3": "3 промаха",
   "excel.waiwai.guaranteed": "Кол-во гарантированных",
-  "excel.waiwai.excludedSuffix": " (не учитывается)"
+  "excel.waiwai.excludedSuffix": " (не учитывается)",
+  "ui.setting.dataManagerHint": "Unnecessary data can be deleted",
+  "ui.common.data": "Data",
+  "ui.common.dataManage": "Data Management",
+  "ui.common.updateTime": "Update Date",
+  "ui.common.status": "Status",
+  "ui.common.action": "Operation",
+  "ui.common.deleted": "Deleted",
+  "ui.common.normal": "Normal",
+  "ui.common.delete": "Delete",
+  "ui.common.restore": "Restore",
+  "excel.raw.sheet": "Raw Data"
 }

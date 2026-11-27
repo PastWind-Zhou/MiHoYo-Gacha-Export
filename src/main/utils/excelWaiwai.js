@@ -14,10 +14,14 @@ const cellBorder = () => ({
   right: { style: 'thin', color: { argb: 'ffc4c2bf' } }
 })
 
+// 「否」的文案：headers 未提供时用常见的「否」，
+// 否则调用方漏传 headers.no 会让排除池无法置灰
+const NO_LABEL = '否'
+
 // 向 workbook 追加「歪率分析」工作表
 // rows 由 utils/waiwaiStats.buildWaiwaiRows 生成
 // headers 为 i18n.excel.waiwai 文案
-const addWaiwaiSheet = (workbook, rows, headers, customFont) => {
+const addWaiwaiSheet = (workbook, rows, headers = {}, customFont) => {
   const sheet = workbook.addWorksheet(headers.sheet, { views: [{ state: 'frozen', ySplit: 1 }] })
   sheet.columns = WAIWAI_COLUMNS.map((key, index) => ({
     header: headers[key],
@@ -54,7 +58,7 @@ const addWaiwaiSheet = (workbook, rows, headers, customFont) => {
       }
       cell.font = {
         name: customFont,
-        color: { argb: row.included === headers.no ? 'ff9a9a9a' : 'ff757575' }
+        color: { argb: row.included === (headers.no || NO_LABEL) ? 'ff9a9a9a' : 'ff757575' }
       }
     })
   })

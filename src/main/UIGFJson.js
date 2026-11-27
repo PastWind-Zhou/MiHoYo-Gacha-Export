@@ -85,7 +85,16 @@ const exportUIGF = async (uids) => {
   }
   const fulldata = []
   uids.forEach(uid => {
-    if (dataMap.has(uid)) fulldata.push(dataMap.get(uid))
+    // 渲染层传过来的 uid 可能是字符串（安全处理后不再是 DOM 里的数字），
+    // 这里做一次宽松匹配，避免查不到数据
+    if (dataMap.has(uid)) {
+      fulldata.push(dataMap.get(uid))
+      return
+    }
+    const num = Number(uid)
+    if (Number.isFinite(num) && dataMap.has(num)) {
+      fulldata.push(dataMap.get(num))
+    }
   })
   if (!fulldata.length) {
     throw new Error('数据为空')
@@ -173,9 +182,10 @@ const parseAccount = async (gameId, uidData) => {
   if (targetLang && uigfShortLang.has(targetLang)) targetLang = uigfShortLang.get(targetLang)
 
   let idTarget = null
+  const rawList = Array.isArray(uidData.list) ? uidData.list : []
   if (g.idMode === 'item') {
     idTarget = idJsons[gameId][targetLang] || null
-    if (!idTarget && uidData.list[0] && (!uidData.list[0].name || !uidData.list[0].item_type || !uidData.list[0].rank_type)) {
+    if (!idTarget && rawList[0] && (!rawList[0].name || !rawList[0].item_type || !rawList[0].rank_type)) {
       targetLang = config.lang
       idTarget = idJsons[gameId][targetLang] || null
     }
@@ -186,7 +196,8 @@ const parseAccount = async (gameId, uidData) => {
   else region_time_zone = uidData.timezone
 
   const resultTemp = []
-  uidData.list.forEach(recordEntry => {
+  rawList.forEach(recordEntry => {
+    if (!recordEntry || typeof recordEntry !== 'object') return
     const rec = {
       gacha_id: recordEntry.gacha_id || '',
       gacha_type: recordEntry.gacha_type,
@@ -245,6 +256,8 @@ const parseAccount = async (gameId, uidData) => {
 }
 
 const importUIGF = async () => {
+  // 等配置加载完成：config.game 决定导入到哪个游戏
+  await config.ready
   const filepath = dialog.showOpenDialogSync({
     properties: ['openFile'],
     filters: [
@@ -260,9 +273,22 @@ const importUIGF = async () => {
         console.error('不支持此版本UIGF')
         return
       }
+      // UIGF 的游戏键 → 本工具内部游戏 id
+      // 原神的 UIGF 键是 hk4e，内部 id 是 genshin（games.js 里 uigfKey: 'hk4e'），
+      // 直接把 hk4e 当内部 id 用会取到 undefined 的游戏配置而抛错
+      const uigfGameMap = { hk4e: 'genshin', hkrpg: 'hkrpg', nap: 'nap' }
       for (const key of ['hk4e', 'hkrpg', 'nap']) {
-        for (const uidData of (jsonData[key] || [])) {
-          await parseAccount(key, uidData)
+        const gameId = uigfGameMap[key] || key
+        const accounts = Array.isArray(jsonData[key]) ? jsonData[key] : []
+        for (const uidData of accounts) {
+          if (!uidData || typeof uidData !== 'object') continue
+          try {
+            await parseAccount(gameId, uidData)
+          } catch (e) {
+            // 单个账号异常不应中断整个导入
+            console.error('UIGF 账号导入失败:', key, e && e.message)
+            sendMsg(`UIGF ${key} 账号导入失败: ${e && e.message}`, 'ERROR')
+          }
         }
       }
       // v4.2 新增 hk4e_ugc：透传保存到原神目录，不混入常规卡池

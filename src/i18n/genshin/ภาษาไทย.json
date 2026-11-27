@@ -173,5 +173,16 @@
   "excel.waiwai.deviation2": "เสีย 2 ครั้ง",
   "excel.waiwai.deviation3": "เสีย 3 ครั้ง",
   "excel.waiwai.guaranteed": "จำนวนที่การันตี",
-  "excel.waiwai.excludedSuffix": " (ไม่นับในสถิติ)"
+  "excel.waiwai.excludedSuffix": " (ไม่นับในสถิติ)",
+  "ui.setting.dataManagerHint": "Unnecessary data can be deleted",
+  "ui.common.data": "Data",
+  "ui.common.dataManage": "Data Management",
+  "ui.common.updateTime": "Update Date",
+  "ui.common.status": "Status",
+  "ui.common.action": "Operation",
+  "ui.common.deleted": "Deleted",
+  "ui.common.normal": "Normal",
+  "ui.common.delete": "Delete",
+  "ui.common.restore": "Restore",
+  "excel.raw.sheet": "Raw Data"
 }

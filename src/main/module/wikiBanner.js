@@ -22,10 +22,31 @@ const EXTRA_SOURCES = {
   ]
 }
 
+const NAMED_ENTITIES = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  mdash: '—', ndash: '–', hellip: '…', laquo: '«', raquo: '»',
+  ldquo: '“', rdquo: '”', lsquo: '‘', rsquo: '’',
+  middot: '·', bull: '•', copy: '©', reg: '®', trade: '™',
+  times: '×', divide: '÷', deg: '°', plusmn: '±'
+}
+
 const decodeEntities = (s) => String(s)
-  .replace(/&nbsp;/g, ' ').replace(/&#160;/g, ' ').replace(/&amp;/g, '&')
-  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
-  .replace(/&#91;/g, '〔').replace(/&#93;/g, '〕')
+  .replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/g, (match, body) => {
+    if (body[0] === '#') {
+      const isHex = body[1] === 'x' || body[1] === 'X'
+      const code = parseInt(isHex ? body.slice(2) : body.slice(1), isHex ? 16 : 10)
+      if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return match
+      try {
+        return String.fromCodePoint(code)
+      } catch (e) {
+        return match
+      }
+    }
+    const key = body.toLowerCase()
+    return Object.prototype.hasOwnProperty.call(NAMED_ENTITIES, key) ? NAMED_ENTITIES[key] : match
+  })
+  // 未以分号结尾的常见实体（部分 wiki 输出不补分号）
+  .replace(/&(nbsp|amp|lt|gt|quot)(?![a-zA-Z0-9#])/g, (match, key) => NAMED_ENTITIES[key.toLowerCase()] || match)
 
 const textOf = (h) => decodeEntities(String(h).replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim()
 
@@ -95,7 +116,7 @@ const extractTitle = (rows, rawTable) => {
 
 const parsePage = (html) => {
   const results = []
-  const tableRe = /<table[^>]*class="wikitable[^"]*"[^>]*>([\s\S]*?)<\/table>/g
+  const tableRe = /<table[^>]*class="[^"]*wikitable[^"]*"[^>]*>([\s\S]*?)<\/table>/g
   let tm
   while ((tm = tableRe.exec(html))) {
     const raw = tm[1]
@@ -151,7 +172,7 @@ const parsePage = (html) => {
 // 判定时需按抽卡记录的 item_type 分别取用。
 const parseJiluPage = (html) => {
   const clean = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '')
-  const tableRe = /<table[^>]*class="wikitable[^"]*"[^>]*>([\s\S]*?)<\/table>/g
+  const tableRe = /<table[^>]*class="[^"]*wikitable[^"]*"[^>]*>([\s\S]*?)<\/table>/g
   const tables = []
   let tm
   while ((tm = tableRe.exec(clean)) !== null) {
@@ -260,7 +281,9 @@ const fetchBanners = async (game) => {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
       'Accept-Language': 'zh-CN,zh;q=0.9'
-    }
+    },
+    // 必须设超时：降级链在此挂起会导致整个同步流程永久不返回
+    timeout: 30000
   })
   if (!res.ok) throw new Error('wiki HTTP ' + res.status)
   const html = await res.text()
@@ -270,24 +293,30 @@ const fetchBanners = async (game) => {
   // 注意：集录祈愿的期次并不连续（中间隔着常规角色池），
   // 因此不能用「上一期结束时间」推定缺失的开始时间 ——
   // 那样会得到远早于实际的值。缺失的 start 留空，
-  // 由 gachaBanner.fillJiluStarts 用内置角色池的同期时间补齐。
+  // 由 gachaBanner.alignJiluTimes 用内置角色池的同期时间补齐。
   const extras = EXTRA_SOURCES[game] || []
+  const warnings = []
   for (const ex of extras) {
     try {
       const r2 = await fetch(ex.url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
           'Accept-Language': 'zh-CN,zh;q=0.9'
-        }
+        },
+        timeout: 30000
       })
-      if (!r2.ok) continue
+      if (!r2.ok) {
+        warnings.push(`wiki HTTP ${r2.status}: ${ex.url}`)
+        continue
+      }
       const extra = parseJiluPage(await r2.text())
       for (const x of extra) {
         x.channel = ex.channel
         list.push(x)
       }
     } catch (e) {
-      // 额外页面失败不影响主数据
+      // 额外页面失败不影响主数据，但要留下痕迹便于排查
+      warnings.push(`${ex.url}: ${e && e.message}`)
     }
   }
 
@@ -296,6 +325,7 @@ const fetchBanners = async (game) => {
     timezone: 'UTC+8',
     updated: new Date().toISOString().slice(0, 10),
     note: '从 Biligame wiki 抓取',
+    ...(warnings.length ? { warnings } : {}),
     banners: list.map((x) => ({
       version: x.version,
       phase: x.phase,

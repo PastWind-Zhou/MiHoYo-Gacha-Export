@@ -1,8 +1,8 @@
 <template>
   <p class="text-gray-500 text-xs mb-2 text-center whitespace-nowrap">
-    <span class="mx-2" :title="new Date(detail.date[0]).toLocaleString()">{{new Date(detail.date[0]).toLocaleDateString()}}</span>
+    <span class="mx-2" :title="formatDate(detail.date[0])">{{formatDate(detail.date[0], true)}}</span>
     -
-    <span class="mx-2" :title="new Date(detail.date[1]).toLocaleString()">{{new Date(detail.date[1]).toLocaleDateString()}}</span>
+    <span class="mx-2" :title="formatDate(detail.date[1])">{{formatDate(detail.date[1], true)}}</span>
   </p>
   <p class="text-gray-600 text-xs mb-1">
     <span class="mr-1">{{text.total}}
@@ -27,7 +27,7 @@
 
   <p class="text-gray-600 text-xs mb-1" v-if="detail.ssrPos.length">
     {{text.history}}{{colon}}
-    <span :title="`${item[2]}${item[3] === '400' ? '\n' + props.i18n.excel.wish2 : ''}`" :class="{wish2: item[3] === '400'}" class="cursor-help mr-1" :style="`color:${colorList[index]}`"
+    <span :title="`${item[2]}${item[3] === '400' ? '\n' + wish2Text : ''}`" :class="{wish2: item[3] === '400'}" class="cursor-help mr-1" :style="`color:${colorList[index]}`"
       v-for="(item, index) of detail.ssrPos" :key="item"
     >
       {{item[0]}}[{{item[1]}}]
@@ -48,8 +48,21 @@ const props = defineProps({
 
 const type = computed(() => props.data[0])
 const detail = computed(() => props.data[1])
-const text = computed(() => props.i18n.ui.data)
-const colon = computed(() => props.i18n.symbol.colon)
+// i18n 未加载完成时 props.i18n 可能为 null，
+// 直接 props.i18n.ui.data 会抛错并中断整个页面渲染
+const text = computed(() => props.i18n?.ui?.data || {})
+const colon = computed(() => props.i18n?.symbol?.colon || ':')
+// 「跃迁2」提示文案（仅原神 400 池用）
+const wish2Text = computed(() => props.i18n?.excel?.wish2 || '')
+
+// 时间戳无效时（0 或 NaN）显示 '-'，避免渲染成 1970/1/1
+const formatDate = (ts, dateOnly = false) => {
+  const num = Number(ts)
+  if (!Number.isFinite(num) || num <= 0) return '-'
+  const d = new Date(num)
+  if (isNaN(d.getTime())) return '-'
+  return dateOnly ? d.toLocaleDateString() : d.toLocaleString()
+}
 
 // 绝区零有邦布分类，标题里追加邦布数量
 const bangText = (level) => {

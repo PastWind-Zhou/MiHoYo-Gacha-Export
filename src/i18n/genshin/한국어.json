@@ -170,5 +170,16 @@
   "excel.waiwai.deviation2": "2회 경사",
   "excel.waiwai.deviation3": "3회 경사",
   "excel.waiwai.guaranteed": "확정 횟수",
-  "excel.waiwai.excludedSuffix": " (통계 제외)"
+  "excel.waiwai.excludedSuffix": " (통계 제외)",
+  "ui.setting.dataManagerHint": "Unnecessary data can be deleted",
+  "ui.common.data": "Data",
+  "ui.common.dataManage": "Data Management",
+  "ui.common.updateTime": "Update Date",
+  "ui.common.status": "Status",
+  "ui.common.action": "Operation",
+  "ui.common.deleted": "Deleted",
+  "ui.common.normal": "Normal",
+  "ui.common.delete": "Delete",
+  "ui.common.restore": "Restore",
+  "excel.raw.sheet": "Raw Data"
 }

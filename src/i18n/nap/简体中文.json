@@ -206,5 +206,6 @@
   "ui.banner.channelWeapon": "武器",
   "ui.banner.channelLightcone": "光锥",
   "ui.banner.channelEngine": "音擎",
-  "ui.banner.channelJilu": "集录祈愿"
+  "ui.banner.channelJilu": "集录祈愿",
+  "excel.raw.sheet": "原始数据"
 }
