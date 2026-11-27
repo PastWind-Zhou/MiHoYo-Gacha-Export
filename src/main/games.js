@@ -63,9 +63,16 @@ const games = {
     endpointFor: () => 'getGachaLog',
     typeParam: 'gacha_type',
     typeOrder: ['301', '302', '500', '200', '100'],
-    // UIGF v4.2 千星奇域（hk4e_ugc）卡池类型：当前仅做导入导出透传，
-    // 主动抓取与本地展示按方案推迟到 1.0.2
+    // UIGF v4.2 千星奇域（hk4e_ugc）卡池类型：导入导出透传 + 主动抓取
+    // 20011/20012/20021/20022 是接口按性别/类别细分的返回值（op_gacha_type），
+    // 抓取时只需按 1000（常驻）/ 2000（活动）两类请求，细分值保留在记录里透传
     ugcPools: ['1000', '2000', '20011', '20012', '20021', '20022'],
+    // 千星奇域主动抓取配置：与常规祈愿共用 authkey 与 apiBase，
+    // 但 endpoint、分页大小（官方上限 5）、类型顺序都不同
+    ugcEndpoint: 'getBeyondGachaLog',
+    ugcTypeParam: 'gacha_type',
+    ugcTypeOrder: ['1000', '2000'],
+    ugcPageSize: 5,
     probeType: null,
     langFix: true,
     serverTimeZone: null,
@@ -152,6 +159,13 @@ const getGachaTypes = (game, lang) => {
   return dict[lang] || dict['en-us'] || dict['zh-cn']
 }
 
+// 千星奇域类型文案（仅原神）：存放在 gachaType/genshin.json 的 "ugc" 键下，
+// 与常规卡池文案分开，避免常规抓取循环把 1000/2000 当成祈愿池去请求
+const getUGCTypes = (lang) => {
+  const ugcDict = gachaTypes.genshin.ugc || {}
+  return ugcDict[lang] || ugcDict['en-us'] || ugcDict['zh-cn'] || []
+}
+
 // 各游戏实际存在的文案键（星铁/原神为 3-4-5 星，绝区零为 B-A-S 级）
 // 统一映射到「5/4/3」三档语义，渲染层组件与原版完全一致
 const NO_TOP_KEY = { hkrpg: 'no5star', genshin: 'no5star', nap: 'no5star' }
@@ -162,6 +176,8 @@ const getGameInfo = (game, lang) => {
   return {
     game,
     types: getGachaTypes(game, lang),
+    // 千星奇域仅原神：其他游戏给空数组，渲染层据此隐藏 UGC 面板
+    ugcTypes: game === 'genshin' ? getUGCTypes(lang) : [],
     hideKey: g.hideKey,
     hidePool: g.hidePool,
     // 真实 rank 值 -> 5/4/3 三档
@@ -171,4 +187,4 @@ const getGameInfo = (game, lang) => {
   }
 }
 
-module.exports = { games, GAMES, isValidGame, getGachaTypes, getGameInfo, idJsons, gachaTypes }
+module.exports = { games, GAMES, isValidGame, getGachaTypes, getUGCTypes, getGameInfo, idJsons, gachaTypes }

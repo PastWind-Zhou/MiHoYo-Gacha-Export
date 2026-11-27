@@ -379,7 +379,9 @@
     },
     "hk4e_ugc": {
       "type": "array",
-      "properties": {
+      "items": {
+        "type": "object",
+        "properties": {
         "uid": {
           "oneOf": [
             {
@@ -485,11 +487,12 @@
           }
         }
       },
-      "required": [
-        "uid",
-        "timezone",
-        "list"
-      ]
+        "required": [
+          "uid",
+          "timezone",
+          "list"
+        ]
+      }
     }
   },
   "required": [

@@ -2,6 +2,11 @@ const {
   UIGF_VERSION,
   UGC_TYPES,
   isSupportedV4Version,
+  isValidUid,
+  isInsideDir,
+  isValidTimezone,
+  normalizeTimezone,
+  uidTimeZone,
   makeInfo,
   uigfGachaTypeOf,
   toUIGFRecord,
@@ -154,17 +159,21 @@ describe('UIGF v4.2 转换', () => {
 })
 
 describe('hk4e_ugc 千星奇域', () => {
-  test('UGC 卡池类型与内置 Schema 一致', () => {
-    const enumTypes = schema.properties.hk4e_ugc.properties.list.items.properties.op_gacha_type.enum
+  test('UGC 卡池类型与内置 Schema 一致（账号字段在 items 下）', () => {
+    const ugcSchema = schema.properties.hk4e_ugc.items
+    expect(schema.properties.hk4e_ugc.type).toBe('array')
+    expect(ugcSchema.type).toBe('object')
+    expect(ugcSchema.required).toEqual(['uid', 'timezone', 'list'])
+    const enumTypes = ugcSchema.properties.list.items.properties.op_gacha_type.enum
     expect(enumTypes).toEqual(UGC_TYPES)
-    expect(schema.properties.hk4e_ugc.properties.list.items.required).toEqual([
+    expect(ugcSchema.properties.list.items.required).toEqual([
       'id', 'schedule_id', 'item_type', 'item_id', 'item_name', 'rank_type', 'time', 'op_gacha_type'
     ])
   })
 
   test('导入归一化：保留合法记录，丢弃未知卡池类型，兼容 name 字段', () => {
     const account = normalizeUGCAccount({
-      uid: 123,
+      uid: 123456789,
       timezone: '8',
       lang: 'zh-cn',
       list: [
@@ -190,11 +199,112 @@ describe('hk4e_ugc 千星奇域', () => {
         }
       ]
     })
-    expect(account.uid).toBe('123')
+    expect(account.uid).toBe('123456789')
     expect(account.timezone).toBe(8)
     expect(account.list).toHaveLength(1)
     expect(account.list[0].item_name).toBe('兼容名称')
     expect(account.list[0]).not.toHaveProperty('name')
+  })
+
+  test('接口返回值用 gacha_type 时回退为 op_gacha_type，不被全量过滤', () => {
+    const account = normalizeUGCAccount({
+      uid: '123456789',
+      timezone: 8,
+      list: [{
+        id: ID,
+        schedule_id: '10000001',
+        item_type: '角色',
+        item_id: '10000022',
+        item_name: '测试角色',
+        rank_type: '5',
+        time: TIME,
+        gacha_type: '1000'
+      }]
+    })
+    expect(account.list).toHaveLength(1)
+    expect(account.list[0].op_gacha_type).toBe('1000')
+  })
+
+  test('非法 uid（路径穿越形态）整个账号丢弃，timezone 超范围回退 8', () => {
+    expect(normalizeUGCAccount({ uid: 'x/../../../../evil', timezone: 8, list: [] })).toBe(null)
+    expect(normalizeUGCAccount({ uid: '../../evil', timezone: 8, list: [] })).toBe(null)
+    expect(normalizeUGCAccount({ uid: '12345', timezone: 8, list: [] })).toBe(null)
+    const account = normalizeUGCAccount({ uid: '123456789', timezone: null, lang: '', list: [] })
+    expect(account.timezone).toBe(8)
+    expect(account.lang).toBe('zh-cn')
+    const outOfRange = normalizeUGCAccount({ uid: '123456789', timezone: 20, list: [] })
+    expect(outOfRange.timezone).toBe(8)
+  })
+})
+
+describe('原型键防护', () => {
+  test('groupUIGFRecords：__proto__/constructor 键不会命中原型成员', () => {
+    const grouped = groupUIGFRecords([
+      { gacha_type: '__proto__', id: '1', time: TIME },
+      { gacha_type: 'constructor', id: '2', time: TIME },
+      { gacha_type: '301', id: '3', time: TIME }
+    ], { allowedUigfTypes: [] })
+    const keys = Object.keys(grouped)
+    expect(keys.sort()).toEqual(['301', '__proto__', 'constructor'])
+    // null 原型对象上 __proto__ 是普通自有属性
+    expect(Array.isArray(grouped['__proto__'])).toBe(true)
+    expect(grouped['__proto__']).toHaveLength(1)
+    expect(Object.getPrototypeOf(grouped)).toBe(null)
+  })
+})
+
+describe('uid 与路径安全', () => {
+  test('isValidUid：6-12 位纯数字才合法，路径穿越形态一律拒绝', () => {
+    expect(isValidUid('123456789')).toBe(true)
+    expect(isValidUid(123456789)).toBe(true)
+    expect(isValidUid('123456789012')).toBe(true)
+    expect(isValidUid('123')).toBe(false)
+    expect(isValidUid('1234567890123')).toBe(false)
+    expect(isValidUid('x/../../../../evil')).toBe(false)
+    expect(isValidUid('../../evil')).toBe(false)
+    expect(isValidUid('')).toBe(false)
+    expect(isValidUid(null)).toBe(false)
+    expect(isValidUid(undefined)).toBe(false)
+  })
+
+  test('isInsideDir：目标必须仍在 base 目录内', () => {
+    const base = '/tmp/userData/genshin'
+    expect(isInsideDir(base, '/tmp/userData/genshin/ugc-list-123456789.json')).toBe(true)
+    expect(isInsideDir(base, '/tmp/userData/genshin/sub/dir/file.json')).toBe(true)
+    // path.join 归一化后的穿越形态必须被识别
+    expect(isInsideDir(base, '/tmp/userData/genshin/../../evil.json')).toBe(false)
+    expect(isInsideDir(base, '/tmp/other/file.json')).toBe(false)
+    expect(isInsideDir(base, base)).toBe(false)
+  })
+})
+
+describe('timezone 归一', () => {
+  test('null/undefined/空串/超范围都视为缺失，回退默认 +8', () => {
+    expect(normalizeTimezone(null)).toBe(8)
+    expect(normalizeTimezone(undefined)).toBe(8)
+    expect(normalizeTimezone('')).toBe(8)
+    expect(normalizeTimezone('abc')).toBe(8)
+    expect(normalizeTimezone(20)).toBe(8)
+    expect(normalizeTimezone(-13)).toBe(8)
+    expect(normalizeTimezone('8')).toBe(8)
+    expect(normalizeTimezone(1)).toBe(1)
+    expect(normalizeTimezone(-5)).toBe(-5)
+    expect(normalizeTimezone(null, 3)).toBe(3)
+  })
+
+  test('isValidTimezone：Number(null)===0 不能伪装成合法 0 时区', () => {
+    expect(isValidTimezone(null)).toBe(false)
+    expect(isValidTimezone('')).toBe(false)
+    expect(isValidTimezone(0)).toBe(true)
+    expect(isValidTimezone(14)).toBe(true)
+    expect(isValidTimezone(-12)).toBe(true)
+    expect(isValidTimezone(15)).toBe(false)
+  })
+
+  test('uidTimeZone：UID 前缀 6(-5)/7(1)/其余(8)', () => {
+    expect(uidTimeZone('612345678')).toBe(-5)
+    expect(uidTimeZone('712345678')).toBe(1)
+    expect(uidTimeZone('912345678')).toBe(8)
   })
 })
 
@@ -216,6 +326,21 @@ describe('Schema 轻量校验', () => {
     const warnings = validateUIGF42(file).join('\n')
     expect(warnings).toMatch(/op_gacha_type/)
     expect(warnings).toMatch(/time 格式不合法/)
+  })
+
+  test('timezone null / 空串 / 超范围均报警告（不再被 Number() 伪装成 0）', () => {
+    const file = buildValidFile()
+    file.nap[0].timezone = null
+    file.hk4e_ugc[0].timezone = ''
+    file.hkrpg[0].timezone = 20
+    const warnings = validateUIGF42(file).join('\n')
+    expect(warnings).toMatch(/nap\[0\]\.timezone 非法/)
+    expect(warnings).toMatch(/hk4e_ugc\[0\]\.timezone 非法/)
+    expect(warnings).toMatch(/hkrpg\[0\]\.timezone 非法/)
+    // 合法 0 时区不报警
+    const okFile = buildValidFile()
+    okFile.nap[0].timezone = 0
+    expect(validateUIGF42(okFile)).toEqual([])
   })
 
   test('旧版本号会提示但不是错误', () => {
