@@ -627,7 +627,8 @@ const normalizeUpdateInfo = (raw) => {
 }
 
 // 更新流程中主进程正在忙的状态：此时不允许再次触发检查/更新/跳过
-const updateBusyStatus = ['checking', 'downloading', 'verifying', 'backing-up', 'backingUp', 'staging', 'moving', 'validating', 'ready']
+// 'restoring' 是校验失败后从备份恢复的阶段，同样不能被用户打断
+const updateBusyStatus = ['checking', 'downloading', 'verifying', 'backing-up', 'backingUp', 'staging', 'moving', 'validating', 'restoring', 'ready']
 const updateBusy = computed(() => updateBusyStatus.includes(state.updateInfo.status))
 
 // 启动时同步一次主进程的更新状态（如启动检测已发现新版本）
@@ -746,7 +747,7 @@ const ipcHandlers = {
     console.error(err)
     ipcRenderer.invoke('LOG_ERROR', err && err.stack ? err.stack : String(err)).catch(() => {})
   },
-  // 主进程更新相关的用户提示（如「更新已完成，重启工具后生效」）：
+  // 真正的更新完成信号（仅「升级后数据校验通过」会发）：
   // 展示消息并进入 updated 状态，让顶部的「直接更新」重启按钮出现
   UPDATE_HINT: (event, message) => {
     // 启动阶段该事件可能先于数据加载完成到达（监听器已提前注册），
@@ -754,6 +755,13 @@ const ipcHandlers = {
     updateHintMessage = message
     state.log = message
     state.status = 'updated'
+  },
+  // 其它更新提示（校验后从备份恢复、正在回滚、旧版本程序缺失、
+  // 上次更新失败、检测到未完成更新、备份清单缺失等）：
+  // 只写日志并 toast，绝不改 status，否则会误报成「更新完成」并显示重启按钮
+  UPDATE_MESSAGE: (event, message) => {
+    state.log = message
+    ElMessage.info(message)
   },
   // 主进程在检测/下载/备份/暂存/校验各阶段推送的更新状态对象
   UPDATE_STATUS: (event, message) => {
