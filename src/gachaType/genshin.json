@@ -1,4 +1,36 @@
 {
+  "ugc": {
+    "en-us": [
+      {
+        "key": "1000",
+        "name": "Simulacra Standard Wish"
+      },
+      {
+        "key": "2000",
+        "name": "Simulacra Event Wish"
+      }
+    ],
+    "zh-cn": [
+      {
+        "key": "1000",
+        "name": "奇域常驻祈愿"
+      },
+      {
+        "key": "2000",
+        "name": "奇域活动祈愿"
+      }
+    ],
+    "zh-tw": [
+      {
+        "key": "1000",
+        "name": "奇域常駐祈願"
+      },
+      {
+        "key": "2000",
+        "name": "奇域活動祈願"
+      }
+    ]
+  },
   "en-us": [
     {
       "key": "200",

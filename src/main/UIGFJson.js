@@ -8,10 +8,15 @@ const i18n = require('./i18n')
 const { mergeData } = require('./utils/mergeData')
 const { sendMsg, userDataPath } = require('./utils')
 const { games, idJsons } = require('./games')
+const { loadUGCAccounts, saveUGCAccount } = require('./ugcData')
 const {
   UIGF_VERSION,
   UIGF_GACHA_TYPES,
   isSupportedV4Version,
+  isValidUid,
+  isInsideDir,
+  normalizeTimezone,
+  uidTimeZone,
   makeInfo,
   toUIGFRecord,
   sortByRecordId,
@@ -30,14 +35,6 @@ const uigfShortLang = new Map([
   ['ru', 'ru-ru'], ['th', 'th-th'], ['vi', 'vi-vn']
 ])
 
-// 原神 v4.1 导出规则：UID 前缀 6(美服) -5、7(欧服) 1、其余 8
-const uidTimeZone = (uid) => {
-  const s = `${uid}`
-  if (s.startsWith('6')) return -5
-  if (s.startsWith('7')) return 1
-  return 8
-}
-
 // 导出时把工具内部的短语言码还原为 UIGF Schema 要求的完整码
 const uigfLang = (lang) => {
   if (!lang) return 'zh-cn'
@@ -50,31 +47,10 @@ const uigfLang = (lang) => {
 // 原神：按名称查 item_id（内置 UIGF 字典）
 const genshinItemId = (lang, itemIdName) => {
   const dict = idJsons.genshin[lang] || idJsons.genshin['en-us'] || {}
+  // 名称来自导入数据：__proto__/constructor 等原型键会命中原型成员，
+  // hasOwnProperty 守卫避免把 Object 构造器当 item_id 写进记录
+  if (!Object.prototype.hasOwnProperty.call(dict, itemIdName)) return ''
   return dict[itemIdName] || ''
-}
-
-// 千星奇域（hk4e_ugc）：独立于常规抽卡记录存放，导入导出透传
-const ugcDir = () => path.join(userDataPath, 'genshin')
-
-const loadUGCAccounts = async () => {
-  const dir = ugcDir()
-  await fs.ensureDir(dir)
-  const files = await fs.readdir(dir)
-  const accounts = []
-  for (const fname of files) {
-    if (/^ugc-list-\d+\.json$/.test(fname)) {
-      try {
-        const account = await fs.readJSON(path.join(dir, fname))
-        const normalized = normalizeUGCAccount(account)
-        if (normalized) accounts.push(normalized)
-      } catch (e) {}
-    }
-  }
-  return accounts
-}
-
-const saveUGCAccount = async (account) => {
-  await fs.outputJSON(path.join(ugcDir(), `ugc-list-${account.uid}.json`), account)
 }
 
 const exportUIGF = async (uids) => {
@@ -157,6 +133,9 @@ const loadGameData = async (gameId) => {
       try {
         const d = await fs.readJSON(path.join(dir, fname))
         d.result = new Map(d.result)
+        // uid 归一为字符串：旧版数据可能是数字，与导入侧的字符串 uid
+        // 不一致时会误判为「新账号」并产生重复文件
+        if (d.uid) d.uid = String(d.uid)
         const g = games[gameId]
         d.result.forEach((value, key) => {
           if (g.legacyArray) {
@@ -173,11 +152,19 @@ const loadGameData = async (gameId) => {
 // 把一个账号的 UIGF 记录并入指定游戏的本地数据
 const parseAccount = async (gameId, uidData) => {
   const g = games[gameId]
+  // uid 统一按字符串处理：UIGF 里 uid 可能是数字而本地 dataMap 键是字符串，
+  // 不归一会造成同账号重复、语言/时区回退错乱
+  const uid = String(uidData.uid ?? '').trim()
+  // uid 直接参与本地文件名拼接（gacha-list-<uid>.json），非法形态
+  // （如 x/../../evil）经 path.join 归一化后会逃出游戏目录，必须拦截
+  if (!isValidUid(uid)) {
+    throw new Error(`非法 uid: ${uid || '(空)'}`)
+  }
   const dataMapForGame = await loadGameData(gameId)
-  const isNew = !dataMapForGame.has(uidData.uid)
+  const isNew = !dataMapForGame.has(uid)
 
   let targetLang
-  if (!isNew) targetLang = dataMapForGame.get(uidData.uid).lang
+  if (!isNew) targetLang = dataMapForGame.get(uid).lang
   else targetLang = uidData.lang
   if (targetLang && uigfShortLang.has(targetLang)) targetLang = uigfShortLang.get(targetLang)
 
@@ -192,7 +179,7 @@ const parseAccount = async (gameId, uidData) => {
   }
 
   let region_time_zone
-  if (!isNew) region_time_zone = dataMapForGame.get(uidData.uid).region_time_zone
+  if (!isNew) region_time_zone = dataMapForGame.get(uid).region_time_zone
   else region_time_zone = uidData.timezone
 
   const resultTemp = []
@@ -213,12 +200,18 @@ const parseAccount = async (gameId, uidData) => {
     if (recordEntry.uigf_gacha_type) {
       rec.uigf_gacha_type = String(recordEntry.uigf_gacha_type)
     }
-    // 绝区零：导入时把时间转换为本地时区（保持原工具行为）
-    if (gameId === 'nap' && Number.isFinite(Number(uidData.timezone)) && Number.isFinite(Number(region_time_zone))) {
-      rec.time = convertTimeZone(recordEntry.time, Number(uidData.timezone), Number(region_time_zone))
+    // 绝区零：导入时把时间转换为本地时区（保持原工具行为）。
+    // timezone 为 null/空串时 Number() 会得到 0（伦敦时区），导致整份
+    // 记录偏移 8 小时；这里统一归一：缺失按 +8 处理，与 UGC 侧行为一致
+    if (gameId === 'nap') {
+      const fromTz = normalizeTimezone(uidData.timezone, 8)
+      const toTz = normalizeTimezone(region_time_zone, 8)
+      rec.time = convertTimeZone(recordEntry.time, fromTz, toTz)
     }
     // 有物品库的游戏按 item_id 回填名称/类型/星级
-    if (g.idMode === 'item' && idTarget && rec.item_id && idTarget[rec.item_id]) {
+    // item_id 来自导入数据：constructor/__proto__ 等原型键会命中 Object 的成员，
+    // 把角色名改写成 'Object'；只接受字典自有属性（审计低危 14）
+    if (g.idMode === 'item' && idTarget && rec.item_id && Object.prototype.hasOwnProperty.call(idTarget, rec.item_id)) {
       const info = idTarget[rec.item_id]
       rec.name = info.name ?? rec.name
       rec.item_type = info.item_type ?? rec.item_type
@@ -233,25 +226,32 @@ const parseAccount = async (gameId, uidData) => {
     allowedUigfTypes: gameId === 'genshin' ? UIGF_GACHA_TYPES : []
   })
   const resultMap = new Map(Object.entries(resultTempGrouped))
-  const mergedData = mergeData(dataMapForGame.get(uidData.uid), { result: resultMap, uid: uidData.uid })
+  const mergedData = mergeData(dataMapForGame.get(uid), { result: resultMap, uid })
   let temp
   if (isNew) {
-    temp = { result: mergedData, time: Date.now(), uid: uidData.uid, lang: targetLang, region_time_zone, deleted: false }
+    temp = { result: mergedData, time: Date.now(), uid, lang: targetLang, region_time_zone, deleted: false }
   } else {
-    const old = dataMapForGame.get(uidData.uid)
+    const old = dataMapForGame.get(uid)
     temp = { result: mergedData, time: Date.now(), uid: old.uid, lang: targetLang, region_time_zone: old.region_time_zone, deleted: old.deleted }
   }
 
-  // 落盘到对应游戏目录
+  // 落盘到对应游戏目录（uid 已过校验，这里再确认路径仍在游戏目录内）
+  const gameDir = path.join(userDataPath, gameId)
+  const target = path.join(gameDir, `gacha-list-${uid}.json`)
+  if (!isInsideDir(gameDir, target)) {
+    throw new Error('非法落盘路径')
+  }
   const obj = Object.assign({}, temp)
   obj.result = [...obj.result]
-  await fs.outputJSON(path.join(userDataPath, gameId, `gacha-list-${uidData.uid}.json`), obj)
-  config.value().currents[gameId] = uidData.uid
+  await fs.outputJSON(target, obj)
+  config.value().currents[gameId] = uid
   // 当前游戏则同步内存
   if (gameId === config.game) {
     const { dataMap } = getData()
-    dataMap.set(uidData.uid, temp)
-    await changeCurrent(uidData.uid)
+    // 历史内存数据可能是数字键，同账号会出现重复，导入前清掉数字形态的旧键
+    dataMap.delete(Number(uid))
+    dataMap.set(uid, temp)
+    await changeCurrent(uid)
   }
 }
 
@@ -291,10 +291,16 @@ const importUIGF = async () => {
           }
         }
       }
-      // v4.2 新增 hk4e_ugc：透传保存到原神目录，不混入常规卡池
+      // v4.2 新增 hk4e_ugc：透传保存到原神目录，不混入常规卡池。
+      // 单个账号异常（如非法 uid）不应中断整个导入
       for (const ugcAccount of (jsonData.hk4e_ugc || [])) {
-        const normalized = normalizeUGCAccount(ugcAccount)
-        if (normalized) await saveUGCAccount(normalized)
+        try {
+          const normalized = normalizeUGCAccount(ugcAccount)
+          if (normalized) await saveUGCAccount(normalized)
+        } catch (e) {
+          console.error('UIGF hk4e_ugc 账号导入失败:', e && e.message)
+          sendMsg(`UIGF hk4e_ugc 账号导入失败: ${e && e.message}`, 'ERROR')
+        }
       }
     } else if (jsonData?.info?.uigf_version === 'v3.0') {
       // 原神 UIGF v3.0 单账号
