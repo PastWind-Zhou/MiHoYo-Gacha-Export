@@ -27,7 +27,9 @@
         </el-tooltip>
       </div>
       <div class="flex gap-2">
-        <el-select v-if="state.status !== 'loading' && dataMap && (dataMap.size > 1 || (dataMap.size === 1 && state.current === 0))" class="!w-44"   @change="changeCurrent" v-model="uidSelectText">
+        <!-- uidSelectText 是只读 computed：用 v-model 会在选择时被写入并触发 Vue 警告，
+             改用 :model-value 单向绑定 + @change 处理选择 -->
+        <el-select v-if="state.status !== 'loading' && dataMap && (dataMap.size > 1 || (dataMap.size === 1 && state.current === 0))" class="!w-44" @change="changeCurrent" :model-value="uidSelectText">
           <el-option
             v-for="item of dataMap"
             :key="item[0]"
@@ -66,7 +68,7 @@
         <waiwai-panel :stats="state.waiwaiStats" :i18n="state.i18n"></waiwai-panel>
       </el-tab-pane>
     </el-tabs>
-    <Setting v-show="state.showSetting" :i18n="state.i18n" :gacha-data-info="dataInfo" :game-info="state.gameInfo" @refreshData="readData()" @changeLang="getI18nData()" @close="showSetting(false)"></Setting>
+    <Setting v-show="state.showSetting" :i18n="state.i18n" :gacha-data-info="dataInfo" :game-info="state.gameInfo" :update-info="state.updateInfo" :update-action="state.updateAction" :update-busy="updateBusy" @refreshData="readData()" @changeLang="getI18nData()" @close="showSetting(false)" @checkUpdate="checkUpdate()" @applyUpdate="applyUpdate()" @skipUpdate="skipUpdate()"></Setting>
 
     <el-dialog :title="ui.urlDialog.title" v-model="state.showUrlDlg" width="90%" class="max-w-md">
       <p class="mb-4 text-gray-500">{{ui.urlDialog.hint}}</p>
@@ -121,7 +123,11 @@ const state = reactive({
   authkeyTimeout: false,
   config: {},
   tab: 'stats',
-  waiwaiStats: null
+  waiwaiStats: null,
+  // 自动更新状态（主进程 GET_UPDATE_INFO / UPDATE_STATUS 推送，经 normalizeUpdateInfo 归一化）
+  updateInfo: { status: 'init', available: false, version: '', notes: '', progress: null, error: '' },
+  // 正在进行的更新操作：'' | 'check' | 'apply' | 'skip'（用于设置页按钮 loading）
+  updateAction: ''
 })
 
 const gameOptions = computed(() => {
@@ -247,28 +253,41 @@ const fetchData = async (url) => {
   state.log = ''
   state.status = 'loading'
   const seq = ++loadSeq
-  const data = await ipcRenderer.invoke('FETCH_DATA', url)
-  // 已有更新的请求发出，丢弃本次响应
-  if (seq !== loadSeq) return
-  if (data) {
-    applyData(data)
-    state.status = 'loaded'
-    await loadWaiwai()
-  } else {
+  try {
+    const data = await ipcRenderer.invoke('FETCH_DATA', url)
+    // 已有更新的请求发出，丢弃本次响应
+    if (seq !== loadSeq) return
+    if (data) {
+      applyData(data)
+      state.status = 'loaded'
+      await loadWaiwai()
+    } else {
+      state.status = 'failed'
+    }
+  } catch (e) {
+    // IPC 异常必须复位状态，否则按钮永久转圈
+    if (seq !== loadSeq) return
     state.status = 'failed'
+    state.log = e?.message || String(e)
   }
 }
 
 const readData = async (force = false) => {
   const seq = ++loadSeq
-  const data = await ipcRenderer.invoke(force ? 'FORCE_READ_DATA' : 'READ_DATA')
-  if (seq !== loadSeq) return
-  if (data) {
-    applyData(data)
-    if (data.dataMap.get(data.current)) {
-      state.status = 'loaded'
+  try {
+    const data = await ipcRenderer.invoke(force ? 'FORCE_READ_DATA' : 'READ_DATA')
+    if (seq !== loadSeq) return
+    if (data) {
+      applyData(data)
+      if (data.dataMap.get(data.current)) {
+        state.status = 'loaded'
+      }
+      await loadWaiwai()
     }
-    await loadWaiwai()
+  } catch (e) {
+    if (seq !== loadSeq) return
+    state.status = 'failed'
+    state.log = e?.message || String(e)
   }
 }
 
@@ -285,12 +304,23 @@ const loadWaiwai = async () => {
 }
 
 const changeGame = async (gameId) => {
-  const data = await ipcRenderer.invoke('SWITCH_GAME', gameId)
-  if (data) {
-    applyData(data)
-    state.status = data.dataMap.get(data.current) ? 'loaded' : 'init'
-    state.authkeyTimeout = false
-    state.log = ''
+  // 快速连续切换游戏时，旧请求可能晚于新请求返回，
+  // 复用 loadSeq 丢弃过期的 SWITCH_GAME 响应
+  const seq = ++loadSeq
+  try {
+    const data = await ipcRenderer.invoke('SWITCH_GAME', gameId)
+    if (seq !== loadSeq) return
+    if (data) {
+      applyData(data)
+      state.status = data.dataMap.get(data.current) ? 'loaded' : 'init'
+      state.authkeyTimeout = false
+      state.log = ''
+    }
+  } catch (e) {
+    if (seq !== loadSeq) return
+    state.status = 'failed'
+    state.log = e?.message || String(e)
+    return
   }
   await getI18nData()
   await updateConfig()
@@ -299,17 +329,29 @@ const changeGame = async (gameId) => {
 }
 
 const getI18nData = async () => {
-  const data = await ipcRenderer.invoke('I18N_DATA')
-  if (data) {
-    state.i18n = data
-    setTitle()
+  try {
+    const data = await ipcRenderer.invoke('I18N_DATA')
+    if (data) {
+      state.i18n = data
+      setTitle()
+    }
+    // 切换语言后 gameInfo（卡池类型名等）仍停留在旧语言，
+    // 必须同步刷新，否则要等切游戏或重启才更新
+    await updateConfig()
+  } catch (e) {
+    console.error('load i18n failed', e)
   }
   // 卡池名称跟随语言，切换语言后刷新统计
   await loadWaiwai()
 }
 
 const saveExcel = async () => {
-  await ipcRenderer.invoke('SAVE_EXCEL')
+  try {
+    await ipcRenderer.invoke('SAVE_EXCEL')
+  } catch (e) {
+    console.error('save excel failed', e)
+    ElMessage.error(e?.message || String(e))
+  }
 }
 
 const exportUIGFJSON = () => {
@@ -348,7 +390,11 @@ const exportUIGFJSON = () => {
     cancelButtonText: state.i18n.ui.common.cancel,
     beforeClose: (action, instance, done) => {
       if (action === 'confirm') {
-        ipcRenderer.invoke('EXPORT_UIGF_JSON', Array.from(selected));
+        // IPC 失败不能让确认弹窗永远停在安装中状态
+        ipcRenderer.invoke('EXPORT_UIGF_JSON', Array.from(selected)).catch((e) => {
+          console.error('export uigf failed', e)
+          ElMessage.error(e?.message || String(e))
+        })
       }
       done();
     }
@@ -359,13 +405,21 @@ const exportUIGFJSON = () => {
 
 const importData = async () => {
   state.status = 'loading'
-  const data = await ipcRenderer.invoke('IMPORT_UIGF_JSON')
-  if (data) {
-    applyData(data)
-    state.status = 'loaded'
-    await loadWaiwai()
-  } else {
+  const seq = ++loadSeq
+  try {
+    const data = await ipcRenderer.invoke('IMPORT_UIGF_JSON')
+    if (seq !== loadSeq) return
+    if (data) {
+      applyData(data)
+      state.status = 'loaded'
+      await loadWaiwai()
+    } else {
+      state.status = 'failed'
+    }
+  } catch (e) {
+    if (seq !== loadSeq) return
     state.status = 'failed'
+    state.log = e?.message || String(e)
   }
 }
 
@@ -380,7 +434,12 @@ const exportCommand = (type) => {
 }
 
 const openCacheFolder = async () => {
-  await ipcRenderer.invoke('OPEN_CACHE_FOLDER')
+  try {
+    await ipcRenderer.invoke('OPEN_CACHE_FOLDER')
+  } catch (e) {
+    console.error('open cache folder failed', e)
+    ElMessage.error(e?.message || String(e))
+  }
 }
 
 const changeCurrent = async (uid) => {
@@ -390,7 +449,11 @@ const changeCurrent = async (uid) => {
     state.status = 'loaded'
   }
   state.current = uid
-  await ipcRenderer.invoke('CHANGE_UID', uid)
+  try {
+    await ipcRenderer.invoke('CHANGE_UID', uid)
+  } catch (e) {
+    console.error('change uid failed', e)
+  }
   await loadWaiwai()
 }
 
@@ -399,7 +462,12 @@ const newUser = async () => {
 }
 
 const relaunch = async () => {
-  await ipcRenderer.invoke('RELAUNCH')
+  try {
+    await ipcRenderer.invoke('RELAUNCH')
+  } catch (e) {
+    console.error('relaunch failed', e)
+    ElMessage.error(e?.message || String(e))
+  }
 }
 
 const maskUid = (uid) => {
@@ -437,31 +505,151 @@ const setTitle = () => {
 }
 
 const updateConfig = async () => {
-  const config = await ipcRenderer.invoke('GET_CONFIG')
-  state.config = config
-  state.gameInfo = config.gameInfo
-  if (config.game && config.game !== state.game) {
-    state.game = config.game
+  try {
+    const config = await ipcRenderer.invoke('GET_CONFIG')
+    state.config = config
+    state.gameInfo = config.gameInfo
+    if (config.game && config.game !== state.game) {
+      state.game = config.game
+    }
+  } catch (e) {
+    // 配置读取失败时保留现有状态，避免把 gameInfo 清空导致渲染层连锁异常
+    console.error('load config failed', e)
+  }
+}
+
+// ---- 自动更新（渲染层只负责触发与展示，检测/下载/切换都在主进程完成）----
+
+// 主进程推送的更新状态结构不可控（handler 未实现/抛错/旧版本），
+// 统一在这里归一化，避免渲染层各处重复做类型防御
+const normalizeUpdateInfo = (raw) => {
+  const info = raw && typeof raw === 'object' ? raw : {}
+  const progress = typeof info.progress === 'number' && Number.isFinite(info.progress)
+    ? Math.min(100, Math.max(0, Math.round(info.progress)))
+    : null
+  const status = typeof info.status === 'string' && info.status ? info.status : 'init'
+  return {
+    status,
+    // 主进程回推的 UPDATE_STATUS 可能只带 status 不带 available，
+    // 这里按状态推断一次，避免「立即更新」按钮一直不可用
+    available: !!info.available || status === 'available',
+    version: info.version == null ? '' : String(info.version),
+    notes: info.notes == null ? '' : String(info.notes),
+    progress,
+    error: info.error == null ? '' : String(info.error)
+  }
+}
+
+// 更新流程中主进程正在忙的状态：此时不允许再次触发检查/更新/跳过
+const updateBusyStatus = ['checking', 'downloading', 'verifying', 'backing-up', 'backingUp', 'staging', 'moving', 'validating', 'ready']
+const updateBusy = computed(() => updateBusyStatus.includes(state.updateInfo.status))
+
+// 启动时同步一次主进程的更新状态（如启动检测已发现新版本）
+const initUpdateInfo = async () => {
+  try {
+    const info = await ipcRenderer.invoke('GET_UPDATE_INFO')
+    state.updateInfo = normalizeUpdateInfo(info)
+  } catch (e) {
+    // 主进程尚未注册该 IPC（旧版本/未合并 update 模块）时保持默认值，不影响其它功能
+  }
+}
+
+const setUpdateResult = (result, fallbackInfo) => {
+  // 契约：{ ok: true, data } | { ok: false, error }
+  if (result && result.ok) {
+    if (result.data) {
+      state.updateInfo = normalizeUpdateInfo(result.data)
+    }
+  } else {
+    state.updateInfo = normalizeUpdateInfo({
+      ...fallbackInfo,
+      status: 'failed',
+      error: result && result.error
+    })
+  }
+}
+
+const checkUpdate = async () => {
+  if (state.updateAction || updateBusy.value) return
+  state.updateAction = 'check'
+  try {
+    const result = await ipcRenderer.invoke('CHECK_UPDATE')
+    setUpdateResult(result, {})
+  } catch (e) {
+    // IPC 异常（handler 未注册/抛错）不能让按钮永久 loading
+    state.updateInfo = normalizeUpdateInfo({ status: 'failed', error: e?.message || String(e) })
+  } finally {
+    state.updateAction = ''
+  }
+}
+
+const applyUpdate = async () => {
+  if (state.updateAction || updateBusy.value || !state.updateInfo.available) return
+  state.updateAction = 'apply'
+  const fallbackInfo = {
+    available: true,
+    version: state.updateInfo.version
+  }
+  try {
+    const result = await ipcRenderer.invoke('APPLY_UPDATE')
+    // 下载/备份/暂存的后续进度由主进程通过 UPDATE_STATUS 推送
+    setUpdateResult(result, fallbackInfo)
+  } catch (e) {
+    state.updateInfo = normalizeUpdateInfo({ ...fallbackInfo, status: 'failed', error: e?.message || String(e) })
+  } finally {
+    state.updateAction = ''
+  }
+}
+
+const skipUpdate = async () => {
+  if (state.updateAction || updateBusy.value || !state.updateInfo.available) return
+  state.updateAction = 'skip'
+  try {
+    const result = await ipcRenderer.invoke('SKIP_UPDATE', { version: state.updateInfo.version })
+    if (result && result.ok) {
+      // 主进程记录跳过版本；渲染层本地收敛为「已跳过」，
+      // 避免主进程不回推状态时界面仍显示「发现新版本」
+      state.updateInfo = normalizeUpdateInfo({ ...state.updateInfo, status: 'skipped', available: false })
+    } else {
+      state.updateInfo = normalizeUpdateInfo({ ...state.updateInfo, status: 'failed', error: result && result.error })
+    }
+  } catch (e) {
+    state.updateInfo = normalizeUpdateInfo({ ...state.updateInfo, status: 'failed', error: e?.message || String(e) })
+  } finally {
+    state.updateAction = ''
   }
 }
 
 const copyUrl = async () => {
-  const successed = await ipcRenderer.invoke('COPY_URL')
-  if (successed) {
-    ElMessage.success(ui.value.extra.urlCopied)
-  } else {
-    ElMessage.error(state.i18n.log.url.notFound)
+  try {
+    const successed = await ipcRenderer.invoke('COPY_URL')
+    if (successed) {
+      ElMessage.success(ui.value.extra.urlCopied)
+    } else {
+      ElMessage.error(state.i18n.log.url.notFound)
+    }
+  } catch (e) {
+    console.error('copy url failed', e)
+    ElMessage.error(e?.message || String(e))
   }
 }
 
 const copyApiUrl = async () => {
-  const successed = await ipcRenderer.invoke('COPY_API_URL')
-  if (successed) {
-    ElMessage.success(ui.value.extra.apiUrlCopied)
-  } else {
-    ElMessage.error(state.i18n.log.url.notFound)
+  try {
+    const successed = await ipcRenderer.invoke('COPY_API_URL')
+    if (successed) {
+      ElMessage.success(ui.value.extra.apiUrlCopied)
+    } else {
+      ElMessage.error(state.i18n.log.url.notFound)
+    }
+  } catch (e) {
+    console.error('copy api url failed', e)
+    ElMessage.error(e?.message || String(e))
   }
 }
+
+// 最近一条 UPDATE_HINT 消息：用于启动期事件早于数据加载完成时的补偿展示
+let updateHintMessage = null
 
 // IPC 监听器引用：组件卸载时必须移除，否则会累积并操作已销毁的组件状态
 const ipcHandlers = {
@@ -470,11 +658,22 @@ const ipcHandlers = {
   },
   ERROR: (event, err) => {
     console.error(err)
-    ipcRenderer.invoke('LOG_ERROR', err && err.stack ? err.stack : String(err))
+    ipcRenderer.invoke('LOG_ERROR', err && err.stack ? err.stack : String(err)).catch(() => {})
   },
+  // 主进程更新相关的用户提示（如「更新已完成，重启工具后生效」）：
+  // 展示消息并进入 updated 状态，让顶部的「直接更新」重启按钮出现
   UPDATE_HINT: (event, message) => {
+    // 启动阶段该事件可能先于数据加载完成到达（监听器已提前注册），
+    // onMounted 末尾会补一次展示，避免被 readData 的结果覆盖
+    updateHintMessage = message
     state.log = message
     state.status = 'updated'
+  },
+  // 主进程在检测/下载/备份/暂存/校验各阶段推送的更新状态对象
+  UPDATE_STATUS: (event, message) => {
+    state.updateInfo = normalizeUpdateInfo(message)
+    // 新状态到达后复位按钮 loading，由状态本身决定后续可操作性
+    state.updateAction = ''
   },
   AUTHKEY_TIMEOUT: (event, message) => {
     state.authkeyTimeout = message
@@ -482,12 +681,24 @@ const ipcHandlers = {
 }
 
 onMounted(async () => {
+  // IPC 监听器必须先于任何 await 注册：
+  // 主进程可能在首个 await（updateConfig/readData）期间就发出
+  // LOAD_DATA_STATUS / ERROR / UPDATE_STATUS，晚注册会丢失启动期进度与错误事件
+  for (const [channel, handler] of Object.entries(ipcHandlers)) {
+    ipcRenderer.on(channel, handler)
+  }
+
   await updateConfig()
   await readData()
   await getI18nData()
 
-  for (const [channel, handler] of Object.entries(ipcHandlers)) {
-    ipcRenderer.on(channel, handler)
+  // 同步一次主进程的更新状态；主进程未注册该 IPC 时静默跳过
+  initUpdateInfo()
+
+  // 启动期间收到过 UPDATE_HINT 时补展示（readData 可能已把 status 覆盖为 loaded）
+  if (updateHintMessage !== null && state.status !== 'loading') {
+    state.log = updateHintMessage
+    state.status = 'updated'
   }
 
   // 按设置中的间隔自动同步卡池数据（失败不影响其它功能）

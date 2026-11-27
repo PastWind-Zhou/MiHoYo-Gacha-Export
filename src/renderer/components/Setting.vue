@@ -39,6 +39,16 @@
           @change="saveSetting"
           v-model="settingForm.autoUpdate">
         </el-switch>
+        <p class="text-gray-400 text-xs m-1.5">{{text.updateHint}}</p>
+        <!-- 检测/下载/切换都在主进程完成，按钮只负责触发；
+             进度与阶段由 UPDATE_STATUS 推送，loading 由 updateAction 驱动 -->
+        <div class="flex flex-wrap gap-2 mt-1">
+          <el-button size="small" plain icon="refresh-right" :loading="updateAction === 'check'" :disabled="!!updateAction || updateBusy || state.settingSaving" @click="emit('checkUpdate')">{{text.updateCheck}}</el-button>
+          <el-button size="small" plain type="primary" icon="refresh" :loading="updateAction === 'apply'" :disabled="!!updateAction || updateBusy || state.settingSaving || !updateInfo.available" @click="emit('applyUpdate')">{{text.updateApply}}</el-button>
+          <el-button size="small" plain type="info" :loading="updateAction === 'skip'" :disabled="!!updateAction || updateBusy || state.settingSaving || !updateInfo.available" @click="emit('skipUpdate')">{{text.updateSkip}}</el-button>
+        </div>
+        <p class="text-gray-400 text-xs m-1.5">{{updateStatusText}}</p>
+        <p v-if="updateInfo.notes" class="text-gray-400 text-xs m-1.5 whitespace-pre-wrap">{{updateInfo.notes}}</p>
       </el-form-item>
       <el-form-item v-if="gameInfo?.hideKey === 'hideNovice'" :label="text.hideNovice">
         <el-switch
@@ -65,7 +75,7 @@
           v-model="settingForm.proxyMode">
         </el-switch>
         <p class="text-gray-400 text-xs m-1.5">{{text.proxyModeHint}}</p>
-        <el-button class="focus:outline-none" @click="disableProxy">{{text.closeProxy}}</el-button>
+        <el-button class="focus:outline-none" :loading="state.proxyLoading" :disabled="state.proxyLoading" @click="disableProxy">{{text.closeProxy}}</el-button>
         <p class="text-gray-400 text-xs m-1.5">{{text.closeProxyHint}}</p>
       </el-form-item>
     </el-form>
@@ -115,10 +125,11 @@
 <script setup>
 const { ipcRenderer, shell } = require('electron')
 import { reactive, onMounted, computed, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import BannerManager from './BannerManager.vue'
 import { version } from '../../../package.json'
 
-const emit = defineEmits(['close', 'changeLang', 'refreshData'])
+const emit = defineEmits(['close', 'changeLang', 'refreshData', 'checkUpdate', 'applyUpdate', 'skipUpdate'])
 
 // 构建标识：来自主进程的 build-info.json（打包时由 tools/package.js 写入）。
 // 版本号不变时（如覆盖重发同一版本），用户靠它分辨新旧包
@@ -127,7 +138,15 @@ const buildId = ref('')
 const props = defineProps({
   i18n: Object,
   gachaDataInfo: Array,
-  gameInfo: Object
+  gameInfo: Object,
+  // 更新状态由父组件（App.vue）统一持有，这里只做展示与触发，
+  // 避免设置页卸载/重开时与主进程状态失去同步
+  updateInfo: {
+    type: Object,
+    default: () => ({ status: 'init', available: false, version: '', notes: '', progress: null, error: '' })
+  },
+  updateAction: { type: String, default: '' },
+  updateBusy: { type: Boolean, default: false }
 })
 
 const data = reactive({
@@ -147,7 +166,9 @@ const settingForm = reactive({
 const state = reactive({
   showDataDialog: false,
   showBannerDialog: false,
-  dataActionLoading: false
+  dataActionLoading: false,
+  settingSaving: false,
+  proxyLoading: false
 })
 
 // i18n 可能还没加载完成（props.i18n 为 null），
@@ -160,6 +181,25 @@ const about = computed(() => props.i18n?.ui?.about || {})
 const banner = computed(() => props.i18n?.ui?.banner || {})
 const gameInfo = computed(() => props.gameInfo)
 
+// 更新状态文案：status 来自主进程状态机，部分阶段名用连字符（backing-up），
+// 这里统一映射到 i18n 键；未收录的状态回退到 init，避免界面出现 undefined。
+// I18N_DATA 返回的是原始字典（未走主进程 parseText），占位符在渲染层替换。
+const updateStatusText = computed(() => {
+  const info = props.updateInfo || {}
+  const dict = props.i18n?.ui?.update?.status || {}
+  const status = info.status || 'init'
+  const alias = { 'backing-up': 'backingUp', backing_up: 'backingUp', moving: 'staging' }
+  const key = alias[status] || status
+  let text = dict[key] || dict.init || ''
+  text = String(text)
+    .replace('${version}', info.version || '')
+    .replace('${progress}', info.progress == null ? '--' : `${info.progress}%`)
+  if (status === 'failed' && info.error) {
+    text = `${text} ${info.error}`
+  }
+  return text
+})
+
 // 时间格式化：无有效时间时显示 '-'
 const formatTime = (t) => {
   if (t === undefined || t === null || t === '') return '-'
@@ -170,23 +210,49 @@ const formatTime = (t) => {
 
 const saveSetting = async () => {
   const keys = ['lang', 'logType', 'proxyMode', 'autoUpdate', 'fetchFullHistory', 'hideNovice', 'hideStandard']
-  for (let key of keys) {
-    await ipcRenderer.invoke('SAVE_CONFIG', [key, settingForm[key]])
+  state.settingSaving = true
+  try {
+    for (let key of keys) {
+      await ipcRenderer.invoke('SAVE_CONFIG', [key, settingForm[key]])
+    }
+  } catch (e) {
+    console.error('save setting failed', e)
+    ElMessage.error(e?.message || String(e))
+  } finally {
+    // IPC 异常必须复位，避免后续操作被旧的 loading 状态挡住
+    state.settingSaving = false
   }
 }
 
 const saveLang = async () => {
-  await saveSetting()
-  emit('changeLang')
+  try {
+    await saveSetting()
+  } catch (e) {
+    console.error('save lang failed', e)
+  } finally {
+    // 无论是否保存成功都刷新界面语言，避免切换后停留在旧文案
+    emit('changeLang')
+  }
 }
 
 const closeSetting = () => emit('close')
 
 const disableProxy = async () => {
-  await ipcRenderer.invoke('DISABLE_PROXY')
+  state.proxyLoading = true
+  try {
+    await ipcRenderer.invoke('DISABLE_PROXY')
+  } catch (e) {
+    console.error('disable proxy failed', e)
+    ElMessage.error(e?.message || String(e))
+  } finally {
+    state.proxyLoading = false
+  }
 }
 
-const openLink = (link) => shell.openExternal(link)
+const openLink = (link) => shell.openExternal(link).catch((e) => {
+  console.error('open link failed', e)
+  ElMessage.error(e?.message || String(e))
+})
 
 const deleteData = async (uid, action) => {
   state.dataActionLoading = true
@@ -202,11 +268,18 @@ const deleteData = async (uid, action) => {
 }
 
 onMounted(async () => {
-  data.langMap = await ipcRenderer.invoke('LANG_MAP')
-  const config = await ipcRenderer.invoke('GET_CONFIG')
-  Object.assign(settingForm, config)
-  // 构建标识：主进程从 resources/app/build-info.json 读取
-  buildId.value = (config && config.buildInfo && config.buildInfo.buildId) || ''
+  try {
+    data.langMap = await ipcRenderer.invoke('LANG_MAP')
+    const config = await ipcRenderer.invoke('GET_CONFIG')
+    Object.assign(settingForm, config)
+    // 构建标识：主进程从 resources/app/build-info.json 读取
+    buildId.value = (config && config.buildInfo && config.buildInfo.buildId) || ''
+  } catch (e) {
+    // 单个 IPC 失败不能让整个设置页白屏
+    console.error('load setting failed', e)
+  } finally {
+    state.settingSaving = false
+  }
 })
 
 </script>

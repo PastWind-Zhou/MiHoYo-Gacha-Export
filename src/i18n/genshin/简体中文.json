@@ -212,5 +212,21 @@
   "excel.waiwai.maxDeviationStreak": "最大连歪",
   "excel.waiwai.currentDeviationStreak": "当前连歪",
   "ui.banner.loadFailed": "卡池数据加载失败",
-  "ui.banner.configFailed": "远程数据源配置加载失败"
+  "ui.banner.configFailed": "远程数据源配置加载失败",
+  "ui.setting.updateHint": "开启后会在启动时自动检查新版本，也可以在这里手动检查或立即更新。",
+  "ui.setting.updateCheck": "检查更新",
+  "ui.setting.updateApply": "立即更新",
+  "ui.setting.updateSkip": "跳过此版本",
+  "ui.update.status.init": "尚未检查更新",
+  "ui.update.status.checking": "正在检查更新…",
+  "ui.update.status.available": "发现新版本 ${version}",
+  "ui.update.status.downloading": "正在下载更新 ${progress}",
+  "ui.update.status.verifying": "正在校验更新包…",
+  "ui.update.status.backingUp": "正在备份用户数据…",
+  "ui.update.status.staging": "正在准备新版本…",
+  "ui.update.status.ready": "新版本已就绪，重启后生效",
+  "ui.update.status.validating": "正在校验升级后的数据…",
+  "ui.update.status.idle": "已是最新版本",
+  "ui.update.status.failed": "更新失败",
+  "ui.update.status.skipped": "已跳过版本 ${version}"
 }
