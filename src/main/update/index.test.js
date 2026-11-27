@@ -135,18 +135,19 @@ describe('IPC contract', () => {
     expect(info.error).toBe('network down')
   })
 
-  test('SKIP_UPDATE takes { version } and an empty string clears the marker', async () => {
+  test('SKIP_UPDATE takes the named { version } object and returns { ok: true }', async () => {
     const skipped = await handlers.SKIP_UPDATE({}, { version: 'v1.0.2' })
-    expect(skipped).toEqual({ ok: true, skipVersion: '1.0.2' })
+    expect(skipped).toEqual({ ok: true })
     expect(config.set).toHaveBeenCalledWith('skipVersion', '1.0.2')
+    expect(index.publicInfo().available).toBe(false)
 
     const cleared = await handlers.SKIP_UPDATE({}, { version: '' })
-    expect(cleared).toEqual({ ok: true, skipVersion: '' })
+    expect(cleared).toEqual({ ok: true })
     expect(config.__state.skipVersion).toBe('')
 
-    // 兼容旧渲染层的位置参数
-    await handlers.SKIP_UPDATE({}, '1.0.3')
-    expect(config.__state.skipVersion).toBe('1.0.3')
+    // 位置参数不再接受，避免与渲染层契约分歧
+    const legacy = await handlers.SKIP_UPDATE({}, '1.0.3')
+    expect(legacy).toEqual({ ok: false, error: '参数格式错误，期望 { version }' })
   })
 })
 
@@ -161,11 +162,21 @@ describe('checkUpdate', () => {
     expect(config.save).toHaveBeenCalled()
   })
 
+  test('asset name version must match tag_name, otherwise no update and no download', async () => {
+    const release = makeRelease('1.0.2')
+    release.assets[0].name = 'MiHoYoGachaExport-1.0.1-win.zip'
+    downloader.fetchLatestRelease.mockResolvedValue(release)
+    const result = await handlers.CHECK_UPDATE()
+    expect(result.data.available).toBe(false)
+    expect(downloader.downloadFile).not.toHaveBeenCalled()
+  })
+
   test('fail closed when the chosen asset has no digest', async () => {
     downloader.fetchLatestRelease.mockResolvedValue(makeRelease('1.0.2', { noDigest: true }))
     const result = await handlers.CHECK_UPDATE()
     expect(result.data.available).toBe(false)
     expect(result.data.message).toContain('sha256')
+    expect(downloader.downloadFile).not.toHaveBeenCalled()
   })
 
   test('no platform asset → unavailable', async () => {
@@ -234,6 +245,39 @@ describe('APPLY_UPDATE', () => {
     expect(fs.readFileSync(path.join(paths.userDataPath, 'config.json'), 'utf8')).toBe('{"lang":"zh"}')
     expect(fs.existsSync(path.join(path.dirname(paths.appRoot), 'MiHoYoGachaExport-1.0.2-win'))).toBe(false)
   })
+
+  test('unsafe zip (userData entry / path traversal) is rejected before extraction', async () => {
+    downloader.fetchLatestRelease.mockResolvedValue(makeRelease('1.0.2'))
+    fs.writeFileSync(path.join(paths.userDataPath, 'config.json'), '{"lang":"zh"}')
+    downloader.downloadFile.mockImplementation(async (url, destFile) => { fs.outputFileSync(destFile, 'zip') })
+    downloader.validateZip.mockImplementation(() => { throw new Error('更新包含用户数据目录，已拒绝（隐私保护）') })
+
+    const result = await handlers.APPLY_UPDATE()
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('用户数据目录')
+    expect(downloader.extractZip).not.toHaveBeenCalled()
+    expect(fs.readFileSync(path.join(paths.userDataPath, 'config.json'), 'utf8')).toBe('{"lang":"zh"}')
+    expect(fs.existsSync(path.join(path.dirname(paths.appRoot), 'MiHoYoGachaExport-1.0.2-win'))).toBe(false)
+  })
+
+  test('backup failure aborts before staging and leaves the old version untouched', async () => {
+    downloader.fetchLatestRelease.mockResolvedValue(makeRelease('1.0.2'))
+    fs.writeFileSync(path.join(paths.appRoot, 'sentinel.txt'), 'old-version')
+    // userData 不可读 → backupUserData 在写任何新目录之前就抛错
+    fs.removeSync(paths.userDataPath)
+    downloader.downloadFile.mockImplementation(async (url, destFile) => { fs.outputFileSync(destFile, 'zip') })
+    downloader.validateZip.mockReturnValue({ root: 'MiHoYoGachaExport-1.0.2-win', entries: 1 })
+    downloader.extractZip.mockImplementation((zipFile, stagingDir, root) => {
+      const stagedRoot = path.join(stagingDir, root)
+      fs.outputFileSync(path.join(stagedRoot, 'MiHoYoGachaExport.exe'), 'exe')
+      return stagedRoot
+    })
+
+    const result = await handlers.APPLY_UPDATE()
+    expect(result.ok).toBe(false)
+    expect(fs.readFileSync(path.join(paths.appRoot, 'sentinel.txt'), 'utf8')).toBe('old-version')
+    expect(fs.existsSync(path.join(path.dirname(paths.appRoot), 'MiHoYoGachaExport-1.0.2-win'))).toBe(false)
+  })
 })
 
 describe('initUpdate / post-upgrade validation', () => {
@@ -270,7 +314,7 @@ describe('initUpdate / post-upgrade validation', () => {
     await index.initUpdate()
     expect(fs.readFileSync(path.join(paths.userDataPath, 'config.json'), 'utf8')).toBe('{"lang":"zh"}')
     expect(index.getUpdateInfo().status).toBe('done')
-    expect(sendMsg).toHaveBeenCalledWith(expect.stringContaining('已从备份恢复'), 'UPDATE_HINT')
+    expect(sendMsg).toHaveBeenCalledWith(expect.stringContaining('已从备份恢复'), 'UPDATE_MESSAGE')
   })
 
   test('unrecoverable validation failure → relaunch old version and skip that version', async () => {
@@ -308,7 +352,7 @@ describe('initUpdate / post-upgrade validation', () => {
     })
     await index.initUpdate()
     expect(index.getUpdateInfo().status).toBe('init')
-    expect(sendMsg).toHaveBeenCalledWith(expect.stringContaining('未完成的更新'), 'UPDATE_HINT')
+    expect(sendMsg).toHaveBeenCalledWith(expect.stringContaining('未完成的更新'), 'UPDATE_MESSAGE')
     expect(fs.existsSync(path.join(paths.appRoot, 'update-state.json'))).toBe(false)
   })
 })

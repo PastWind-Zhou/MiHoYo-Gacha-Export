@@ -16,7 +16,7 @@
 | `dataGuard.js` | 前任新增，本轮校验通过 | `buildManifest` / `verifyManifest` / `ensureUserData` / `backupUserData` / `restoreUserData` / `pruneBackups` |
 | `state.js` | 前任新增，本轮校验通过 | `readState` / `writeState`（原子写）/ `clearState` |
 | `index.js` | 前任修改，本轮修复 3 处并对齐 IPC 契约 | 状态机编排、IPC 注册、`initUpdate`、升级后校验与回滚 |
-| `checker.test.js` / `downloader.test.js` / `dataGuard.test.js` / `state.test.js` / `index.test.js` | 本轮新增 | 共 67 个用例 |
+| `checker.test.js` / `downloader.test.js` / `dataGuard.test.js` / `state.test.js` / `index.test.js` | 本轮新增 | 共 71 个用例，含 5 条用户数据零丢失故障路径 |
 
 本轮修复的真实缺陷（均由新增测试暴露）：
 
@@ -35,7 +35,13 @@
 ### 测试结果
 
 - 基线：`jest --runInBand` → 15 suites / 230 tests 全通过
-- 本轮：20 suites / 297 tests 全通过（新增 67 个）
+- 本轮：20 suites / 301 tests 全通过（新增 71 个）
+- 故障路径用例（team-lead 要求）：
+  1. 资产名版本号与 tag_name 不一致 → `checker.test.js` + `index.test.js` 双重拒绝，不下载
+  2. `assets[].digest` 缺失 → `checker.test.js` / `index.test.js` fail closed，断言 `downloadFile` 未被调用
+  3. 下载 sha256 不符 → `downloader.test.js` 清理 `.part`；`index.test.js` 断言用户数据与旧版本目录未被触碰
+  4. zip 含 `../` 穿越或 `userData/` 条目 → `downloader.test.js` 拒绝解压；`index.test.js` 断言 `extractZip` 未调用
+  5. 备份校验失败 / userData 不可读 → `dataGuard.test.js` 不产生半截备份；`index.test.js` 旧版本目录原样保留；备份恢复路径由 `dataGuard.test.js` 的隔离+修复用例与 `index.test.js` 的「缺失文件从备份恢复」用例覆盖
 - 所有 `require` 均为模块顶层静态引用，无函数体内动态 require
 - 未引入新运行时依赖（`semver` / `fs-extra` / `adm-zip` / `electron-fetch` 均已在 devDependencies 且已安装）
 - 不自动删除旧版本目录（`pruneBackups` 只清理自己的 `update-cache/backup`）
@@ -51,15 +57,18 @@
 | `GET_UPDATE_INFO` | 无 | `{ status, available, version, notes, progress, error }` | — |
 | `CHECK_UPDATE` | 无 | `{ ok: true, data: { available, version, message } }` | `{ ok: false, error }` |
 | `APPLY_UPDATE` | 无 | `{ ok: true, data: { version } }` | `{ ok: false, error }` |
-| `SKIP_UPDATE` | `{ version }` | `{ ok: true, skipVersion }` | `{ ok: false, error }` |
+| `SKIP_UPDATE` | `{ version }`（具名对象，不接受位置参数） | `{ ok: true }` | `{ ok: false, error }` |
 
 补充说明：
 
 - `GET_UPDATE_INFO` 除契约字段外还附带 `message` / `currentVersion` / `skipVersion` / `autoUpdate` / `lastUpdateCheck`，渲染层可按需忽略；`error` 仅在 `status === 'failed'` 时非空。
 - `CHECK_UPDATE` 的 `data.message` 是中文提示文案（如「已是最新版本」「已跳过该版本」「更新包缺少 sha256 校验信息，已拒绝更新」）。是否改为 i18n key 由 update-ui 决定。
-- `APPLY_UPDATE` 成功路径会 `app.relaunch()` + `app.quit()`，返回值主要用于失败时展示原因。
-- `SKIP_UPDATE` 传 `{ version: '' }` 表示清除跳过标记；为兼容旧渲染层，也接受位置参数字符串。
-- 另有 `UPDATE_STATUS` 推送通道，载荷为 `GET_UPDATE_INFO` 的快照对象。
+- `APPLY_UPDATE` 成功路径会 `app.relaunch()` + `app.quit()`，返回值主要用于失败时展示原因；阶段进度通过 `UPDATE_STATUS` 推送。
+- `SKIP_UPDATE` 传 `{ version: '' }` 表示清除跳过标记；成功后主进程把 `available` 置 false，但**不再推送 `UPDATE_STATUS`**，避免覆盖渲染层本地的 `skipped` 状态。
+- 推送通道：
+  - `UPDATE_STATUS`：载荷为 `GET_UPDATE_INFO` 的快照对象。阶段名集合：`init` / `checking` / `available` / `downloading` / `verifying` / `backing-up` / `staging` / `ready` / `validating` / `restoring` / `done` / `failed` / `idle`。
+  - `UPDATE_HINT`：**仅**在升级后数据校验通过时发送，是「更新完成/可重启」信号（渲染层据此显示「直接更新」按钮）。
+  - `UPDATE_MESSAGE`：其它提示信息（已从备份恢复、正在回滚、旧版本程序缺失、上次更新失败、检测到未完成更新、备份清单缺失），载荷仍是字符串并会写入日志，**不代表更新完成**。已通知 update-ui-2 增加该通道的监听。
 - 更新源可用环境变量 `GACHA_UPDATE_API` 覆盖，仅用于本地 mock 验证；生产打包不应设置该变量。
 
 状态机（供 UI 展示文案参考）：

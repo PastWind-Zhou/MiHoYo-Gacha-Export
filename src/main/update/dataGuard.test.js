@@ -161,6 +161,17 @@ describe('backupUserData', () => {
     expect(verifyManifest(path.join(result.dir, 'userData'), manifest).ok).toBe(true)
   })
 
+  test('aborts when userData is unreadable, leaving no partial backup', () => {
+    const missing = path.join(tmp, 'missing-userData')
+    const backupRoot = path.join(tmp, 'backup')
+    expect(() => backupUserData(missing, backupRoot, '1.0.2')).toThrow()
+    // 即使留下空的版本目录，也绝不能有半截 userData / manifest 被当成有效备份
+    const dirs = fs.readdirSync(backupRoot)
+    expect(dirs).toHaveLength(1)
+    expect(fs.existsSync(path.join(backupRoot, dirs[0], 'userData'))).toBe(false)
+    expect(fs.existsSync(path.join(backupRoot, dirs[0], 'manifest.json'))).toBe(false)
+  })
+
   test('uses a retry suffix when called twice in the same second', () => {
     const stamp = '2026-11-27T12:00:00.000Z'
     const spy = jest.spyOn(Date.prototype, 'toISOString').mockReturnValue(stamp)
