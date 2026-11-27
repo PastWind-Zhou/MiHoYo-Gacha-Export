@@ -2,6 +2,7 @@
 // 单独抽出，避免 utils.js 引入 electron 依赖导致无法在纯 Node 环境下测试
 const path = require('path')
 const fs = require('fs-extra')
+const { ensureUserData } = require('./update/dataGuard')
 
 let isDev = true
 let appRoot = path.resolve(__dirname, '..', '..')
@@ -38,6 +39,8 @@ const hasUserDataContent = (dir) => {
     if (!entries.length) return false
     return entries.some((name) => {
       if (name === 'config.json' || name === 'log.txt') return true
+      // 只有抽卡记录、没有 config.json 的旧目录不能被误判为空
+      if (/^gacha-list-\d+\.json$/.test(name) || /^ugc-list-\d+\.json$/.test(name)) return true
       try {
         return fs.statSync(path.join(dir, name)).isDirectory()
       } catch (e) {
@@ -88,8 +91,8 @@ const PRODUCT_NAME = 'MiHoYoGachaExport'
 const isProductVersionDir = (name) => {
   if (!name) return false
   if (!name.startsWith(PRODUCT_NAME)) return false
-  // 后面必须是版本号（1.0.1 / 1.0.1-win / 1.0.1-source）
-  return /^MiHoYoGachaExport-\d+\.\d+\.\d+(-[a-z]+)?$/.test(name)
+  // 后面必须是版本号（1.0 / 1.0.1 / 1.0.1-win / 1.0.1-win-x64 / 1.0.1-source）
+  return /^MiHoYoGachaExport-\d+(?:\.\d+){1,2}(?:-[\w-]+)?$/.test(name)
 }
 
 const findUserDataIn = (root, nameFilter) => {
@@ -131,7 +134,9 @@ const migrateUserData = () => {
     }
     if (!best) return null
 
-    fs.copySync(best.dir, userDataPath, { overwrite: false, errorOnExist: false })
+    // 幂等迁移：只补缺失文件，已有文件即使内容不同也绝不覆盖
+    const result = ensureUserData(best.dir, userDataPath)
+    if (result.conflicts.length) return null
     // 返回迁移来源，便于在日志中告知用户「数据是从哪来的」
     return { from: best.dir, to: userDataPath }
   } catch (e) {
