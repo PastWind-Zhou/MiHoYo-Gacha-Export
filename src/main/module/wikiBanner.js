@@ -3,7 +3,9 @@
 //   每个卡池是一个 <table class="wikitable ...">，行标签为 时间 / 版本 / 5星角色(等)
 //   「时间」字段形如 "起始描述 ~ 结束时间"，起始可能是文字（如「4.7版本更新后」）
 //   结束时间是权威值；起始缺失时由同 channel 上一期的结束时间推定
-const fetch = require('electron-fetch').default
+// 复用统一带响应体积上限的取文本函数：中文页面按字符计会严重低估实际字节数，
+// 8MB 上限必须用 Buffer.byteLength 判断
+const fetchText = require('./bannerSource').fetchText
 
 const SOURCES = {
   genshin: 'https://wiki.biligame.com/ys/%E5%BE%80%E6%9C%9F%E7%A5%88%E6%84%BF',
@@ -277,16 +279,12 @@ const inferStarts = (list) => {
 const fetchBanners = async (game) => {
   const url = SOURCES[game]
   if (!url) throw new Error('no wiki source for ' + game)
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
-      'Accept-Language': 'zh-CN,zh;q=0.9'
-    },
-    // 必须设超时：降级链在此挂起会导致整个同步流程永久不返回
-    timeout: 30000
+  // 复用带字节上限与超时的取文本实现：
+  // 中文页面按 text.length 计会严重低估网络字节数，8MB 上限必须用字节判断
+  const html = await fetchText(url, {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+    'Accept-Language': 'zh-CN,zh;q=0.9'
   })
-  if (!res.ok) throw new Error('wiki HTTP ' + res.status)
-  const html = await res.text()
   const list = inferStarts(parsePage(html))
 
   // 额外页面（原神集录祈愿）
@@ -298,18 +296,11 @@ const fetchBanners = async (game) => {
   const warnings = []
   for (const ex of extras) {
     try {
-      const r2 = await fetch(ex.url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
-          'Accept-Language': 'zh-CN,zh;q=0.9'
-        },
-        timeout: 30000
+      const extraHtml = await fetchText(ex.url, {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+        'Accept-Language': 'zh-CN,zh;q=0.9'
       })
-      if (!r2.ok) {
-        warnings.push(`wiki HTTP ${r2.status}: ${ex.url}`)
-        continue
-      }
-      const extra = parseJiluPage(await r2.text())
+      const extra = parseJiluPage(extraHtml)
       for (const x of extra) {
         x.channel = ex.channel
         list.push(x)

@@ -23,6 +23,17 @@ const loadConfig = (local) => {
   return { utils, config }
 }
 
+describe('自动更新默认键', () => {
+  test('首次启动即可读到 autoUpdate / skipVersion / lastUpdateCheck / updateState', async () => {
+    const { config } = loadConfig(null)
+    await config.ready
+    expect(config.autoUpdate).toBe(true)
+    expect(config.skipVersion).toBe('')
+    expect(config.lastUpdateCheck).toBe(0)
+    expect(config.updateState).toBe('init')
+  })
+})
+
 describe('config.game 校验', () => {
   test('config.json 中 game 为 null 时回退 hkrpg', async () => {
     const { config } = loadConfig({ game: null })

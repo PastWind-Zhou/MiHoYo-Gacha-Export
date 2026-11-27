@@ -10,6 +10,11 @@ const config = {
   proxyPort: 8325,
   proxyMode: false,
   autoUpdate: true,
+  // 自动更新状态键：首次启动即可从磁盘读到默认值，
+  // 避免 update 模块读到 undefined 后按错误分支处理（team-lead 协调项）
+  skipVersion: '',
+  lastUpdateCheck: 0,
+  updateState: 'init',
   fetchFullHistory: false,
   hideNovice: false,
   hideStandard: false,

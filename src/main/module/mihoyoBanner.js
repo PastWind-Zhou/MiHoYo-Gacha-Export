@@ -17,7 +17,8 @@
 //
 // 无需登录、无需 DS 签名。
 
-const fetch = require('electron-fetch').default
+// 复用带字节上限的取文本实现：中文公告按字符计会让 8MB 上限失效
+const fetchText = require('./bannerSource').fetchText
 
 const APP_SN = {
   nap: 'zzz_wiki',
@@ -38,9 +39,10 @@ const HEADERS = {
 }
 
 const fetchJSON = async (url, headers = {}) => {
-  const res = await fetch(url, { headers: { ...HEADERS, ...headers }, timeout: 30000 })
-  if (!res.ok) throw new Error('HTTP ' + res.status)
-  return res.json()
+  // 先按字节上限取文本再解析：直接 res.json() 会先把整段响应读进内存，
+  // 中文/emoji 下字符数远小于字节数，8MB 保护形同虚设
+  const text = await fetchText(url, { ...HEADERS, ...headers })
+  return JSON.parse(text)
 }
 
 // 公告正文 → 纯文本行
@@ -223,23 +225,17 @@ const fetchMihoyoBanners = async (game) => {
       const rest = periods.filter((p) => p.postId === items[0].postId && !usedPeriods.has(p))
       if (rest.length) period = rest[0]
     }
-    // 3. 兜底
-    //    这里不能用 periods[0]：匹配失败时把第一个代号的时间赋给所有段，
-    //    会静默写入错误的时间（比直接失败更危险）。
-    //    宁可跳过该段并记录警告，交给其它数据源补齐。
+    // 3. 匹配不到就记 unresolved 并跳过：
+    //    不能拿同公告的其它代号时间兜底——那会把无关池的时间写进排期，
+    //    导致该时段抽卡被错判。宁可跳过，交给其它数据源补齐。
     if (!period) {
-      const anyInPost = periods.find((p) => p.postId === items[0].postId)
-      if (anyInPost) {
-        period = anyInPost
-      } else {
-        unresolvedSections.push({
-          title: items[0] && items[0].title,
-          postId: items[0] && items[0].postId
-        })
-        continue
-      }
+      unresolvedSections.push({
+        title: items[0] && items[0].title,
+        postId: items[0] && items[0].postId
+      })
+      continue
     }
-    if (period) usedPeriods.add(period)
+    usedPeriods.add(period)
 
     for (const item of items) {
       banners.push({
