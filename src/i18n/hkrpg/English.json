@@ -117,7 +117,7 @@
   "ui.waiwai.unluckiest": "Unluckiest",
   "ui.waiwai.upHitRate": "UP hit rate",
   "ui.waiwai.guaranteed": "Guaranteed",
-  "ui.waiwai.deviationDist": "Deviation distribution",
+  "ui.waiwai.deviationDist": "Loss Count Distribution",
   "ui.waiwai.deviationItem": "Lost x{n}",
   "ui.waiwai.unknown": "records lack banner data and are excluded",
   "ui.waiwai.excluded": "This pool is excluded from deviation stats",
@@ -198,5 +198,15 @@
   "ui.banner.channelLightcone": "Light cone",
   "ui.banner.channelEngine": "W-Engine",
   "ui.banner.channelJilu": "Chronicled",
-  "excel.raw.sheet": "Raw Data"
+  "excel.raw.sheet": "Raw Data",
+  "ui.waiwai.maxDeviation": "Max Loss Streak",
+  "ui.waiwai.currentDeviation": "Current Loss Streak",
+  "ui.waiwai.streakDist": "Loss Streak Distribution",
+  "ui.waiwai.streakItem": "{n} in a row",
+  "ui.waiwai.times": "times",
+  "ui.waiwai.excludedHidden": "Constant / novice pools have no UP concept and are excluded from the deviation analysis; their records are still kept in the exported Excel",
+  "excel.waiwai.maxDeviationStreak": "Max Loss Streak",
+  "excel.waiwai.currentDeviationStreak": "Current Loss Streak",
+  "ui.banner.loadFailed": "Failed to load banner data",
+  "ui.banner.configFailed": "Failed to load remote source config"
 }

@@ -136,3 +136,39 @@ describe('Excel 行数据（buildWaiwaiRows）', () => {
     expect(rows[0].noDeviationRate).toBe(0)
   })
 })
+
+describe('歪率分析的池过滤与连歪字段', () => {
+  const { buildWaiwaiStats } = require('./waiwaiStats')
+
+  const result = new Map([
+    ['2', [{ id: 'a', name: '安比', item_type: '角色', rank_type: '5', time: '2024-01-05 12:00:00' }]],
+    ['3', [{ id: 'b', name: '强音热望', item_type: '音擎', rank_type: '5', time: '2024-01-05 12:00:00' }]],
+    ['102', [{ id: 'c', name: '安比', item_type: '角色', rank_type: '5', time: '2024-01-05 12:00:00' }]],
+    ['103', [{ id: 'd', name: '强音热望', item_type: '音擎', rank_type: '5', time: '2024-01-05 12:00:00' }]]
+  ])
+
+  test('绝区零的重映/回响池纳入统计（首个 S 级必不歪）', () => {
+    const r = buildWaiwaiStats({ game: 'nap', result, banners: [], types: [] })
+    const p102 = r.pools.find((p) => p.poolKey === '102')
+    const p103 = r.pools.find((p) => p.poolKey === '103')
+    expect(p102.firstTopIsUp).toBe(true)
+    expect(p103.firstTopIsUp).toBe(true)
+    // 它们不是 excluded —— 会显示在歪率分析里
+    expect(p102.excluded).toBe(false)
+    expect(p103.excluded).toBe(false)
+  })
+
+  test('绝区零常驻/邦布池仍标记为 excluded', () => {
+    const r = buildWaiwaiStats({ game: 'nap', result, banners: [], types: [] })
+    expect(r.pools.find((p) => p.poolKey === '2').excluded).toBe(false)
+    expect(r.pools.find((p) => p.poolKey === '2').firstTopIsUp).toBe(false)
+  })
+
+  test('统计结果带连歪相关字段', () => {
+    const r = buildWaiwaiStats({ game: 'nap', result, banners: [], types: [] })
+    const s = r.pools.find((p) => p.poolKey === '2').stats
+    expect(s).toHaveProperty('maxDeviationStreak')
+    expect(s).toHaveProperty('currentDeviationStreak')
+    expect(s).toHaveProperty('deviationStreakHistogram')
+  })
+})

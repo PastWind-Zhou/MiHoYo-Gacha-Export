@@ -1,8 +1,15 @@
 <template>
-  <div class="bg-white py-4 px-6 w-screen h-screen fixed inset-0 overflow-y-auto">
+  <!-- z-50 必须高于 el-tabs 的 z-index（--el-index-normal + 1 = 2）：
+       fixed 元素虽会创建层叠上下文，但 z-index 为 auto 时视作 0，
+       会被 el-tabs__nav（position:relative; z-index:2）压在下面，
+       导致底层的「抽卡统计 / 歪率分析」标签透到设置页上方。 -->
+  <div class="bg-white py-4 px-6 w-screen h-screen fixed inset-0 z-50 overflow-y-auto">
     <div class="flex content-center items-center mb-4 justify-between">
       <h3 class="text-lg">{{text.title}}</h3>
-      <el-button icon="close" @click="closeSetting" plain circle type="default" class="w-8 h-8 shadow-md focus:shadow-none focus:outline-none fixed top-4 right-6"></el-button>
+      <!-- 关闭按钮必须带 z-index：设置页内容可滚动，滚动后表单内容会盖住
+           fixed 定位的按钮（按钮 z-index:auto，表单在 DOM 中更靠后），
+           导致滚到底部时点不到关闭按钮 -->
+      <el-button icon="close" @click="closeSetting" plain circle type="default" class="w-8 h-8 shadow-md focus:shadow-none focus:outline-none fixed top-4 right-6 z-50"></el-button>
     </div>
     <el-form :model="settingForm" label-width="120px">
       <el-form-item :label="text.language">
@@ -66,11 +73,7 @@
     <p class="text-gray-600 text-xs mt-1">{{text.idVersion}} {{gameInfo?.idVersion || '-'}}</p>
     <p class="text-gray-600 text-xs mt-1">{{about.license}}</p>
     <p class="text-gray-600 text-xs mt-1">GitHub:
-      <a @click="openLink('https://github.com/biuuu/genshin-wish-export')" class="cursor-pointer text-blue-400">genshin-wish-export</a>
-      /
-      <a @click="openLink('https://github.com/biuuu/star-rail-warp-export')" class="cursor-pointer text-blue-400">star-rail-warp-export</a>
-      /
-      <a @click="openLink('https://github.com/earthjasonlin/zzz-signal-search-export')" class="cursor-pointer text-blue-400">zzz-signal-search-export</a>
+      <a @click="openLink('https://github.com/PastWind-Zhou/MiHoYo-Gacha-Export')" class="cursor-pointer text-blue-400">MiHoYo-Gacha-Export</a>
     </p>
     <p class="text-gray-600 text-xs mt-1 pb-6">UIGF: <a @click="openLink('https://uigf.org/')" class="cursor-pointer text-blue-400">https://uigf.org/</a></p>
     <el-dialog v-model="state.showDataDialog" :title="common.dataManage" width="90%">

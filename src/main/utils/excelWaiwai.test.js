@@ -53,7 +53,7 @@ const pools = [
 
 describe('Excel 歪率分析工作表', () => {
   test('列数与顺序符合方案', () => {
-    expect(WAIWAI_COLUMNS).toHaveLength(18)
+    expect(WAIWAI_COLUMNS).toHaveLength(20)
     expect(WAIWAI_COLUMNS[0]).toBe('pool')
     expect(WAIWAI_COLUMNS).toContain('noDeviationRate')
     expect(WAIWAI_COLUMNS).toContain('guaranteed')
@@ -65,7 +65,7 @@ describe('Excel 歪率分析工作表', () => {
     const sheet = addWaiwaiSheet(workbook, rows, headers, 'Microsoft YaHei')
 
     expect(sheet.name).toBe('歪率分析')
-    expect(sheet.columns).toHaveLength(18)
+    expect(sheet.columns).toHaveLength(20)
     expect(sheet.getRow(1).getCell(1).value).toBe('卡池')
     expect(sheet.getRow(1).getCell(9).value).toBe('不歪率')
     expect(sheet.getRow(2).getCell(1).value).toBe('角色活动跃迁')
@@ -90,5 +90,38 @@ describe('Excel 歪率分析工作表', () => {
     addWaiwaiSheet(workbook, rows, headers, 'Microsoft YaHei')
     const buffer = await workbook.xlsx.writeBuffer()
     expect(buffer.length).toBeGreaterThan(1000)
+  })
+})
+
+describe('Excel 歪率分析表的连歪列', () => {
+  const { buildWaiwaiRows } = require('./waiwaiStats')
+  const { WAIWAI_COLUMNS } = require('./excelWaiwai')
+
+  test('列定义包含最大连歪与当前连歪', () => {
+    expect(WAIWAI_COLUMNS).toContain('maxDeviationStreak')
+    expect(WAIWAI_COLUMNS).toContain('currentDeviationStreak')
+  })
+
+  test('行数据输出连歪字段', () => {
+    const rows = buildWaiwaiRows([
+      {
+        poolKey: '11', name: '角色活动跃迁', excluded: false,
+        stats: {
+          total: 100, topCount: 10, upCount: 8, lostCount: 2, unknownCount: 0,
+          noDeviationCount: 6, noDeviationRate: 0.75,
+          maxDeviationStreak: 3, currentDeviationStreak: 1,
+          deviationHistogram: { 1: 2 }, deviationStreakHistogram: { 2: 1, 3: 1 },
+          guaranteedCount: 1
+        }
+      }
+    ], { yes: '是', no: '否' })
+    expect(rows[0].maxDeviationStreak).toBe(3)
+    expect(rows[0].currentDeviationStreak).toBe(1)
+  })
+
+  test('缺字段时补 0', () => {
+    const rows = buildWaiwaiRows([{ poolKey: '11', name: 'X', excluded: false, stats: {} }])
+    expect(rows[0].maxDeviationStreak).toBe(0)
+    expect(rows[0].currentDeviationStreak).toBe(0)
   })
 })

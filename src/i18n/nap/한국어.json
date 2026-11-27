@@ -129,7 +129,7 @@
   "ui.waiwai.unluckiest": "가장 불운",
   "ui.waiwai.upHitRate": "UP 적중률",
   "ui.waiwai.guaranteed": "확정",
-  "ui.waiwai.deviationDist": "경사 분포",
+  "ui.waiwai.deviationDist": "Loss Count Distribution",
   "ui.waiwai.deviationItem": "연속 {n}회 경사",
   "ui.waiwai.unknown": "건의 기록에 배너 정보가 없어 통계에서 제외되었습니다",
   "ui.waiwai.excluded": "이 배너는 경사 통계에서 제외됩니다",
@@ -207,5 +207,15 @@
   "excel.waiwai.deviation3": "3회 경사",
   "excel.waiwai.guaranteed": "확정 횟수",
   "excel.waiwai.excludedSuffix": " (통계 제외)",
-  "excel.raw.sheet": "Raw Data"
+  "excel.raw.sheet": "Raw Data",
+  "ui.waiwai.maxDeviation": "Max Loss Streak",
+  "ui.waiwai.currentDeviation": "Current Loss Streak",
+  "ui.waiwai.streakDist": "Loss Streak Distribution",
+  "ui.waiwai.streakItem": "{n} in a row",
+  "ui.waiwai.times": "times",
+  "ui.waiwai.excludedHidden": "Constant / novice pools have no UP concept and are excluded from the deviation analysis; their records are still kept in the exported Excel",
+  "excel.waiwai.maxDeviationStreak": "Max Loss Streak",
+  "excel.waiwai.currentDeviationStreak": "Current Loss Streak",
+  "ui.banner.loadFailed": "Failed to load banner data",
+  "ui.banner.configFailed": "Failed to load remote source config"
 }

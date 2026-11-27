@@ -109,7 +109,7 @@
   "ui.waiwai.unluckiest": "最非",
   "ui.waiwai.upHitRate": "UP命中率",
   "ui.waiwai.guaranteed": "大保底次數",
-  "ui.waiwai.deviationDist": "歪值分佈",
+  "ui.waiwai.deviationDist": "Loss Count Distribution",
   "ui.waiwai.deviationItem": "歪{n}次",
   "ui.waiwai.unknown": "條記錄缺少卡池數據，未參與統計",
   "ui.waiwai.excluded": "該池不參與歪率統計",
@@ -187,5 +187,15 @@
   "excel.waiwai.deviation3": "歪3次",
   "excel.waiwai.guaranteed": "大保底數",
   "excel.waiwai.excludedSuffix": "（不參與統計）",
-  "excel.raw.sheet": "Raw Data"
+  "excel.raw.sheet": "Raw Data",
+  "ui.waiwai.maxDeviation": "Max Loss Streak",
+  "ui.waiwai.currentDeviation": "Current Loss Streak",
+  "ui.waiwai.streakDist": "Loss Streak Distribution",
+  "ui.waiwai.streakItem": "{n} in a row",
+  "ui.waiwai.times": "times",
+  "ui.waiwai.excludedHidden": "Constant / novice pools have no UP concept and are excluded from the deviation analysis; their records are still kept in the exported Excel",
+  "excel.waiwai.maxDeviationStreak": "Max Loss Streak",
+  "excel.waiwai.currentDeviationStreak": "Current Loss Streak",
+  "ui.banner.loadFailed": "Failed to load banner data",
+  "ui.banner.configFailed": "Failed to load remote source config"
 }

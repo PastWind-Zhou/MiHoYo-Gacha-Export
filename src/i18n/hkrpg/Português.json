@@ -85,7 +85,7 @@
   "ui.waiwai.unluckiest": "Menos sortudo",
   "ui.waiwai.upHitRate": "Taxa de acerto UP",
   "ui.waiwai.guaranteed": "Garantidos",
-  "ui.waiwai.deviationDist": "Distribuição dos desvios",
+  "ui.waiwai.deviationDist": "Loss Count Distribution",
   "ui.waiwai.deviationItem": "x{n} falhas",
   "ui.waiwai.unknown": "registos sem dados de banner, excluídos das estatísticas",
   "ui.waiwai.excluded": "Este banner não é incluído nas estatísticas",
@@ -163,5 +163,15 @@
   "excel.waiwai.deviation3": "3 falhas",
   "excel.waiwai.guaranteed": "N.º de garantidos",
   "excel.waiwai.excludedSuffix": " (não incluído)",
-  "excel.raw.sheet": "Raw Data"
+  "excel.raw.sheet": "Raw Data",
+  "ui.waiwai.maxDeviation": "Max Loss Streak",
+  "ui.waiwai.currentDeviation": "Current Loss Streak",
+  "ui.waiwai.streakDist": "Loss Streak Distribution",
+  "ui.waiwai.streakItem": "{n} in a row",
+  "ui.waiwai.times": "times",
+  "ui.waiwai.excludedHidden": "Constant / novice pools have no UP concept and are excluded from the deviation analysis; their records are still kept in the exported Excel",
+  "excel.waiwai.maxDeviationStreak": "Max Loss Streak",
+  "excel.waiwai.currentDeviationStreak": "Current Loss Streak",
+  "ui.banner.loadFailed": "Failed to load banner data",
+  "ui.banner.configFailed": "Failed to load remote source config"
 }

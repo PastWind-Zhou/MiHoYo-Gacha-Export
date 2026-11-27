@@ -111,7 +111,7 @@
   "ui.waiwai.unluckiest": "最非",
   "ui.waiwai.upHitRate": "UP命中率",
   "ui.waiwai.guaranteed": "大保底次数",
-  "ui.waiwai.deviationDist": "歪值分布",
+  "ui.waiwai.deviationDist": "歪次数分布",
   "ui.waiwai.deviationItem": "歪{n}次",
   "ui.waiwai.unknown": "条记录缺少卡池数据，未参与统计",
   "ui.waiwai.excluded": "该池不参与歪率统计",
@@ -202,5 +202,15 @@
   "ui.common.normal": "正常",
   "ui.common.delete": "删除",
   "ui.common.restore": "恢复",
-  "excel.raw.sheet": "原始数据"
+  "excel.raw.sheet": "原始数据",
+  "ui.waiwai.maxDeviation": "最大连歪",
+  "ui.waiwai.currentDeviation": "当前连歪",
+  "ui.waiwai.streakDist": "连歪次数分布",
+  "ui.waiwai.streakItem": "连歪{n}次",
+  "ui.waiwai.times": "次",
+  "ui.waiwai.excludedHidden": "常驻/新手等卡池没有 UP 概念，不参与歪率统计，记录仍保留在导出的 Excel 中",
+  "excel.waiwai.maxDeviationStreak": "最大连歪",
+  "excel.waiwai.currentDeviationStreak": "当前连歪",
+  "ui.banner.loadFailed": "卡池数据加载失败",
+  "ui.banner.configFailed": "远程数据源配置加载失败"
 }

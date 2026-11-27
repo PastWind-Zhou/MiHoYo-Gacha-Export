@@ -20,7 +20,7 @@ const buildWaiwaiStats = ({ game, result, banners = [], types = [] }) => {
     const channel = g.poolChannel?.[String(poolKey)] || ''
     if (!channel) continue
     const excluded = Array.isArray(g.noDeviationPools) && g.noDeviationPools.includes(String(poolKey))
-    const { stats } = analyzePool({
+    const { stats, firstTopIsUp } = analyzePool({
       game,
       poolKey,
       records,
@@ -32,6 +32,7 @@ const buildWaiwaiStats = ({ game, result, banners = [], types = [] }) => {
       name: nameMap.get(String(poolKey)) || String(poolKey),
       channel,
       excluded,
+      firstTopIsUp,
       stats
     })
   }
@@ -75,6 +76,9 @@ const buildWaiwaiRows = (pools = [], options = {}) => {
       deviation1: histogram['1'] || 0,
       deviation2: histogram['2'] || 0,
       deviation3: histogram['3'] || 0,
+      // 连歪统计：与上面三列（连续歪的 5 星个数）语义不同
+      maxDeviationStreak: s.maxDeviationStreak ?? 0,
+      currentDeviationStreak: s.currentDeviationStreak ?? 0,
       guaranteed: s.guaranteedCount ?? 0
     }
   })

@@ -94,7 +94,7 @@ const isUpAt = (banners, channel, name, timeMs, itemType) => {
 // 开启后兜底记录会被单独计数（fallbackCount），不污染严格指标。
 //
 // 返回每条记录的标记：{ index, top, up, known, fallback, ...原始字段 }
-const judgePool = ({ records = [], banners = [], channel = '', topRank = '5', fallback = false }) => {
+const judgePool = ({ records = [], banners = [], channel = '', topRank = '5', fallback = false, firstTopIsUp = false }) => {
   const top = String(topRank)
   // banners 只接受数组，误传对象时退化为空数组而不是抛错
   const bannerList = Array.isArray(banners) ? banners : []
@@ -114,6 +114,25 @@ const judgePool = ({ records = [], banners = [], channel = '', topRank = '5', fa
       fallback: false
     }
   })
+
+  // 「当期卡池首次 S 级必定不歪」的池（绝区零复刻/回响池的定轨机制）：
+  //   池内第一个最高级记录必定命中当期 UP → 判为不歪；
+  //   其余最高级记录因缺少卡池排期数据无法判定 → 标记为不可判定。
+  // 这样无需卡池排期数据也能把这类池纳入歪率统计。
+  if (firstTopIsUp) {
+    let seenTop = false
+    for (const m of marked) {
+      if (!m.top) continue
+      if (!seenTop) {
+        seenTop = true
+        m.up = true
+        m.known = true
+      } else {
+        m.up = false
+        m.known = false
+      }
+    }
+  }
 
   if (!fallback) return marked
 
@@ -144,6 +163,44 @@ const judgePool = ({ records = [], banners = [], channel = '', topRank = '5', fa
 // 口径（方案 v3 §4.2/§4.3）：
 //   不歪率 = |{ i : up(si) ∧ (i 为首个 UP ∨ up(si-1)) }| / |{ i : up(si) }|
 //   即整段记录里出现的第一个 UP 无条件算一次「不歪」。
+// 连歪统计：把「歪 / 不歪」严格交替的连续出货段切出来，统计每段里的歪数
+//   - 相邻两个出货同号（都歪或都不歪）即断开，另起一段
+//   - 不可判定 / 兜底出货视为打断
+// 返回 { histogram: {连歪次数: 段数}, max: 历史最大连歪次数, current: 当前正在连歪的次数 }
+const calcDeviationStreak = (tops) => {
+  const runs = []
+  let cur = []
+  for (const m of tops || []) {
+    // 打断项：不可判定或兜底判定
+    if (!m.known || m.fallback) {
+      if (cur.length) runs.push(cur)
+      cur = []
+      continue
+    }
+    const c = m.up ? 'U' : 'L'
+    if (cur.length && cur[cur.length - 1] === c) {
+      runs.push(cur)
+      cur = [c]
+    } else {
+      cur.push(c)
+    }
+  }
+  if (cur.length) runs.push(cur)
+
+  const histogram = {}
+  let max = 0
+  for (const run of runs) {
+    const lost = run.reduce((n, c) => n + (c === 'L' ? 1 : 0), 0)
+    // 0 歪的纯 UP 段不计入分布（界面上不需要「连歪 0 次」）
+    if (lost > 0) histogram[lost] = (histogram[lost] || 0) + 1
+    if (lost > max) max = lost
+  }
+  // 当前正在连歪的次数：末尾交替段已积累的歪数（没有歪则为 0）
+  const lastRun = runs.length ? runs[runs.length - 1] : []
+  const current = lastRun.reduce((n, c) => n + (c === 'L' ? 1 : 0), 0)
+  return { histogram, max, current }
+}
+
 const calcPoolStats = (marked, { topRank = '5' } = {}) => {
   const top = String(topRank)
   const tops = (marked || []).filter((m) => m.top)
@@ -202,6 +259,18 @@ const calcPoolStats = (marked, { topRank = '5' } = {}) => {
   })
   if (streak > 0) deviationHistogram[streak] = (deviationHistogram[streak] || 0) + 1
 
+  // ---------- 连歪统计 ----------
+  // 「连歪 N 次」= 「歪 / 不歪」严格交替的连续出货段中，歪的个数。
+  //   例：歪,不歪,歪,不歪 → 2 连歪
+  //   例：歪,不歪,不歪,歪,不歪,歪,不歪 → 2 连歪
+  //       （切分后最长交替段为「不歪,歪,不歪,歪,不歪」，含 2 个歪）
+  // 不可判定 / 兜底出货视为打断，交替段在此断开。
+  //
+  // 注意这与上面的 deviationHistogram（连续歪的 5 星个数）是两套不同语义：
+  //   deviationHistogram：歪 1 次、歪 2 次…（连续几个歪的 5 星）
+  //   连歪统计：歪 / 不歪交替出现的段里累计了几个歪
+  const deviationStreak = calcDeviationStreak(tops)
+
   const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0)
   const gaps = (idxs) => idxs.slice(1).map((v, i) => v - idxs[i])
   const upGaps = gaps(upIndexes)
@@ -225,6 +294,10 @@ const calcPoolStats = (marked, { topRank = '5' } = {}) => {
     maxTopPulls: topGaps.length ? Math.max(...topGaps) : null,
     upHitRate: knownTops.length ? round(upTops.length / knownTops.length) : 0,
     deviationHistogram,
+    // 连歪统计（与 deviationHistogram 语义不同，见 calcDeviationStreak 注释）
+    deviationStreakHistogram: deviationStreak.histogram,
+    maxDeviationStreak: deviationStreak.max,
+    currentDeviationStreak: deviationStreak.current,
     guaranteedCount
   }
 }
@@ -235,9 +308,11 @@ const analyzePool = ({ game, poolKey, records = [], banners = [], topRank, fallb
   const channel = g?.poolChannel?.[String(poolKey)] || ''
   const rank = topRank || g?.ranks?.top || '5'
   const excluded = Array.isArray(g?.noDeviationPools) && g.noDeviationPools.includes(String(poolKey))
-  const marked = judgePool({ records, banners, channel, topRank: rank, fallback })
+  // 「首次 S 级必不歪」的池：无需卡池排期即可判定（见 games.js 的 firstTopIsUpPools）
+  const firstTopIsUp = Array.isArray(g?.firstTopIsUpPools) && g.firstTopIsUpPools.includes(String(poolKey))
+  const marked = judgePool({ records, banners, channel, topRank: rank, fallback, firstTopIsUp })
   const stats = calcPoolStats(marked, { topRank: rank })
-  return { channel, topRank: rank, excluded, marked, stats }
+  return { channel, topRank: rank, excluded, firstTopIsUp, marked, stats }
 }
 
 // ---------- 集录祈愿时间对齐 ----------
@@ -278,5 +353,6 @@ module.exports = {
   judgePool,
   calcPoolStats,
   analyzePool,
+  calcDeviationStreak,
   alignJiluTimes
 }

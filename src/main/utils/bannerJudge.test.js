@@ -391,3 +391,127 @@ describe('集录祈愿时间对齐（alignJiluTimes）', () => {
     expect(out[1].start).toBe('2025-09-08 15:00:00')
   })
 })
+
+describe('连歪统计（calcDeviationStreak）', () => {
+  const { calcDeviationStreak } = require('./bannerJudge')
+  // U = 出货且是当期 UP，L = 出货且是歪，null = 不可判定（打断）
+  const m = (up, known = true) => ({ known, up, fallback: false, top: true })
+  const seq = (s) => s.split('').map((c) => (c === 'L' ? m(false) : c === 'U' ? m(true) : m(false, false)))
+
+  test('「歪,不歪,歪,不歪」为两连歪', () => {
+    const r = calcDeviationStreak(seq('LULU'))
+    expect(r.max).toBe(2)
+    expect(r.histogram).toEqual({ 2: 1 })
+    expect(r.current).toBe(2)
+  })
+
+  test('「歪,不歪,不歪,歪,不歪,歪,不歪」也是两连歪', () => {
+    const r = calcDeviationStreak(seq('LUULULU'))
+    expect(r.max).toBe(2)
+    // 切成 [L,U](1歪) / [U](0歪) / [L,U,L,U](2歪)
+    expect(r.histogram).toEqual({ 1: 1, 2: 1 })
+  })
+
+  test('相邻同号即断开，各自成段', () => {
+    const r = calcDeviationStreak(seq('LULULU'))
+    expect(r.max).toBe(3)
+    expect(r.histogram).toEqual({ 3: 1 })
+  })
+
+  test('连续两个歪（无交替）只算 1 次', () => {
+    const r = calcDeviationStreak(seq('LLLL'))
+    expect(r.max).toBe(1)
+    expect(r.histogram).toEqual({ 1: 4 })
+  })
+
+  test('不可判定的出货打断交替段', () => {
+    const r = calcDeviationStreak(seq('LULxLULU'))
+    // x 打断 → 两段 [L,U,L] 与 [L,U,L,U]
+    expect(r.max).toBe(2)
+    expect(r.histogram).toEqual({ 2: 2 })
+  })
+
+  test('纯 UP 段不计入分布', () => {
+    const r = calcDeviationStreak(seq('UUU'))
+    expect(r.max).toBe(0)
+    expect(r.histogram).toEqual({})
+  })
+
+  test('当前连歪取末尾交替段的歪数', () => {
+    expect(calcDeviationStreak(seq('LULU')).current).toBe(2)
+    // ULUL 整段都是交替的，末尾段含 2 个歪
+    expect(calcDeviationStreak(seq('ULUL')).current).toBe(2)
+    expect(calcDeviationStreak(seq('UUU')).current).toBe(0)
+    // 末尾段被同号断开时，取最后那一段
+    expect(calcDeviationStreak(seq('LULUU')).current).toBe(0)
+  })
+
+  test('空输入不报错', () => {
+    const r = calcDeviationStreak([])
+    expect(r.max).toBe(0)
+    expect(r.current).toBe(0)
+    expect(r.histogram).toEqual({})
+  })
+})
+
+describe('「首个 S 级必不歪」规则（firstTopIsUp）', () => {
+  const { judgePool } = require('./bannerJudge')
+
+  const rec = (name, rank, time) => ({
+    id: name + time, name, item_type: '角色', rank_type: rank, time
+  })
+
+  test('池内第一个 S 级判为 UP，其后 S 级不可判定', () => {
+    const marked = judgePool({
+      records: [
+        rec('A', '4', '2026-01-01 00:00:00'),
+        rec('B', '4', '2026-01-02 00:00:00')
+      ],
+      banners: [], channel: 'character', topRank: '4', firstTopIsUp: true
+    })
+    const tops = marked.filter((m) => m.top)
+    expect(tops[0].up).toBe(true)
+    expect(tops[0].known).toBe(true)
+    expect(tops[1].up).toBe(false)
+    expect(tops[1].known).toBe(false)
+  })
+
+  test('按时间排序后取第一个 S 级（而非记录顺序）', () => {
+    const marked = judgePool({
+      records: [
+        rec('B', '4', '2026-01-05 00:00:00'),
+        rec('A', '4', '2026-01-01 00:00:00')
+      ],
+      banners: [], channel: 'character', topRank: '4', firstTopIsUp: true
+    })
+    expect(marked[0].name).toBe('A')
+    expect(marked[0].up).toBe(true)
+    expect(marked[1].up).toBe(false)
+  })
+
+  test('非最高级记录不受影响', () => {
+    const marked = judgePool({
+      records: [rec('C', '2', '2026-01-01 00:00:00'), rec('A', '4', '2026-01-02 00:00:00')],
+      banners: [], channel: 'character', topRank: '4', firstTopIsUp: true
+    })
+    expect(marked[0].top).toBe(false)
+    expect(marked[1].up).toBe(true)
+  })
+
+  test('未开启该选项时行为不变（依赖卡池数据）', () => {
+    const marked = judgePool({
+      records: [rec('A', '4', '2026-01-01 00:00:00')],
+      banners: [], channel: 'character', topRank: '4'
+    })
+    expect(marked[0].known).toBe(false)
+  })
+
+  test('无 S 级记录时不报错', () => {
+    const marked = judgePool({
+      records: [rec('C', '2', '2026-01-01 00:00:00')],
+      banners: [], channel: 'character', topRank: '4', firstTopIsUp: true
+    })
+    expect(marked.length).toBe(1)
+    expect(marked[0].top).toBe(false)
+  })
+})

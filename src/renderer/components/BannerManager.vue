@@ -37,7 +37,10 @@
 
     <!-- 卡池表 -->
     <div class="flex items-center gap-3 mb-2">
-      <p class="text-sm text-gray-700 font-medium">{{text.table}} ({{filtered.length}}/{{rows.length}})</p>
+      <!-- rows 取自 state：setup 里没有顶层 rows，
+           直接写 {{rows.length}} 会求值为 undefined.length 而抛错，
+           导致整个 BannerManager 渲染中断、表格空白 -->
+      <p class="text-sm text-gray-700 font-medium">{{text.table}} ({{filtered.length}}/{{state.rows.length}})</p>
       <el-select v-model="state.channel" class="!w-36">
         <el-option :label="text.all" value=""></el-option>
         <el-option v-for="item of channelOptions" :key="item.value" :label="item.label" :value="item.value"></el-option>
@@ -179,14 +182,31 @@ const setMessage = (msg, failed = false) => {
   state.failed = failed
 }
 
+// 加载卡池表。失败时保留错误信息并在界面上提示，
+// 避免出现「表格空白却看不出原因」的情况
 const loadTable = async () => {
-  const data = await ipcRenderer.invoke('GET_BANNER_TABLE', currentGame.value)
-  state.rows = data?.banners || []
+  try {
+    const data = await ipcRenderer.invoke('GET_BANNER_TABLE', currentGame.value)
+    state.rows = data?.banners || []
+    return true
+  } catch (e) {
+    state.rows = []
+    setMessage(`${text.value.loadFailed || '卡池数据加载失败'}: ${e.message}`, true)
+    return false
+  }
 }
 
+// 加载远程数据源配置。与 loadTable 相互独立：
+// 配置加载失败不应阻断表格加载（两者串联会导致表格一直空白）
 const loadConfig = async () => {
-  const data = await ipcRenderer.invoke('GET_BANNER_SOURCE_CONFIG')
-  if (data) Object.assign(sourceForm, data)
+  try {
+    const data = await ipcRenderer.invoke('GET_BANNER_SOURCE_CONFIG')
+    if (data) Object.assign(sourceForm, data)
+    return true
+  } catch (e) {
+    setMessage(`${text.value.configFailed || '远程数据源配置加载失败'}: ${e.message}`, true)
+    return false
+  }
 }
 
 const saveConfig = async () => {
@@ -300,7 +320,7 @@ const doSaveUp = async () => {
 }
 
 onMounted(async () => {
-  await loadConfig()
-  await loadTable()
+  // 两项加载互不依赖：配置失败不影响表格，表格失败不影响配置
+  await Promise.all([loadConfig(), loadTable()])
 })
 </script>

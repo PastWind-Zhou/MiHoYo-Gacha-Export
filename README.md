@@ -1,12 +1,16 @@
 # 米哈游抽卡记录导出工具（三合一）
 
-一个工具导出三款游戏的抽卡/跃迁/调频记录，由以下三个开源项目合并而来（MIT）：
+一个工具导出三款游戏的抽卡/跃迁/调频记录。
+
+界面、布局与交互保持与原工具一致（同一套 Electron + Vue 3 + Element Plus UI），左上角新增**游戏切换**下拉，三款游戏的数据、设置与统计完全独立。
+
+## 致谢
+
+本工具由以下三个开源项目合并而来（均 MIT 协议），在此致谢：
 
 - [biuuu/genshin-wish-export](https://github.com/biuuu/genshin-wish-export)（原神 祈愿记录导出）
 - [biuuu/star-rail-warp-export](https://github.com/biuuu/star-rail-warp-export)（崩坏：星穹铁道 跃迁记录导出）
 - [earthjasonlin/zzz-signal-search-export](https://github.com/earthjasonlin/zzz-signal-search-export)（绝区零 调频记录导出）
-
-界面、布局与交互保持与原工具一致（同一套 Electron + Vue 3 + Element Plus UI），左上角新增**游戏切换**下拉，三款游戏的数据、设置与统计完全独立。
 
 ## 支持的功能
 

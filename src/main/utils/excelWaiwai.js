@@ -4,7 +4,10 @@ const ExcelJS = require('../module/exceljs.min.js')
 const WAIWAI_COLUMNS = [
   'pool', 'included', 'total', 'top', 'up', 'lost', 'unknown', 'noDeviation',
   'noDeviationRate', 'avgUp', 'avgTop', 'luckiest', 'unluckiest', 'upHitRate',
-  'deviation1', 'deviation2', 'deviation3', 'guaranteed'
+  'deviation1', 'deviation2', 'deviation3',
+  // 连歪统计（与 deviation1~3 语义不同：那两个是「连续歪的 5 星个数」）
+  'maxDeviationStreak', 'currentDeviationStreak',
+  'guaranteed'
 ]
 
 const cellBorder = () => ({
@@ -32,7 +35,7 @@ const addWaiwaiSheet = (workbook, rows, headers = {}, customFont) => {
   }))
   sheet.addRows(rows)
 
-  const letters = 'ABCDEFGHIJKLMNOPQR'.split('')
+  const letters = 'ABCDEFGHIJKLMNOPQRST'.split('')
   letters.forEach((v) => {
     const cell = sheet.getCell(`${v}1`)
     cell.border = cellBorder()
