@@ -27,7 +27,9 @@
         </el-tooltip>
       </div>
       <div class="flex gap-2">
-        <el-select v-if="state.status !== 'loading' && dataMap && (dataMap.size > 1 || (dataMap.size === 1 && state.current === 0))" class="!w-44"   @change="changeCurrent" v-model="uidSelectText">
+        <!-- uidSelectText 是只读 computed：用 v-model 会在选择时被写入并触发 Vue 警告，
+             改用 :model-value 单向绑定 + @change 处理选择 -->
+        <el-select v-if="state.status !== 'loading' && dataMap && (dataMap.size > 1 || (dataMap.size === 1 && state.current === 0))" class="!w-44" @change="changeCurrent" :model-value="uidSelectText">
           <el-option
             v-for="item of dataMap"
             :key="item[0]"
@@ -65,6 +67,10 @@
       <el-tab-pane :label="ui.tab.waiwai" name="waiwai">
         <waiwai-panel :stats="state.waiwaiStats" :i18n="state.i18n"></waiwai-panel>
       </el-tab-pane>
+      <!-- 千星奇域：仅原神有该数据（hk4e_ugc），切到其他游戏时标签直接隐藏 -->
+      <el-tab-pane v-if="state.game === 'genshin'" :label="ui.tab.ugc" name="ugc">
+        <ugc-panel :data="state.ugcData" :status="state.ugcStatus" :log="state.ugcLog" :i18n="state.i18n" @refresh="readUgcData()" @fetch="fetchUgcData()"></ugc-panel>
+      </el-tab-pane>
     </el-tabs>
     <Setting v-show="state.showSetting" :i18n="state.i18n" :gacha-data-info="dataInfo" :game-info="state.gameInfo" @refreshData="readData()" @changeLang="getI18nData()" @close="showSetting(false)"></Setting>
 
@@ -101,6 +107,7 @@ import PieChart from './components/PieChart.vue'
 import GachaDetail from './components/GachaDetail.vue'
 import Setting from './components/Setting.vue'
 import WaiwaiPanel from './components/WaiwaiPanel.vue'
+import UgcPanel from './components/UgcPanel.vue'
 import gachaDetail from './gachaDetail'
 import { version } from '../../package.json'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -121,7 +128,11 @@ const state = reactive({
   authkeyTimeout: false,
   config: {},
   tab: 'stats',
-  waiwaiStats: null
+  waiwaiStats: null,
+  // 千星奇域（hk4e_ugc）独立数据：不进入 dataMap，不参与常规统计
+  ugcData: null,
+  ugcStatus: 'init',
+  ugcLog: ''
 })
 
 const gameOptions = computed(() => {
@@ -247,28 +258,41 @@ const fetchData = async (url) => {
   state.log = ''
   state.status = 'loading'
   const seq = ++loadSeq
-  const data = await ipcRenderer.invoke('FETCH_DATA', url)
-  // 已有更新的请求发出，丢弃本次响应
-  if (seq !== loadSeq) return
-  if (data) {
-    applyData(data)
-    state.status = 'loaded'
-    await loadWaiwai()
-  } else {
+  try {
+    const data = await ipcRenderer.invoke('FETCH_DATA', url)
+    // 已有更新的请求发出，丢弃本次响应
+    if (seq !== loadSeq) return
+    if (data) {
+      applyData(data)
+      state.status = 'loaded'
+      await loadWaiwai()
+    } else {
+      state.status = 'failed'
+    }
+  } catch (e) {
+    // IPC 异常必须复位状态，否则按钮永久转圈
+    if (seq !== loadSeq) return
     state.status = 'failed'
+    state.log = e?.message || String(e)
   }
 }
 
 const readData = async (force = false) => {
   const seq = ++loadSeq
-  const data = await ipcRenderer.invoke(force ? 'FORCE_READ_DATA' : 'READ_DATA')
-  if (seq !== loadSeq) return
-  if (data) {
-    applyData(data)
-    if (data.dataMap.get(data.current)) {
-      state.status = 'loaded'
+  try {
+    const data = await ipcRenderer.invoke(force ? 'FORCE_READ_DATA' : 'READ_DATA')
+    if (seq !== loadSeq) return
+    if (data) {
+      applyData(data)
+      if (data.dataMap.get(data.current)) {
+        state.status = 'loaded'
+      }
+      await loadWaiwai()
     }
-    await loadWaiwai()
+  } catch (e) {
+    if (seq !== loadSeq) return
+    state.status = 'failed'
+    state.log = e?.message || String(e)
   }
 }
 
@@ -284,13 +308,93 @@ const loadWaiwai = async () => {
   }
 }
 
+// ---- 千星奇域（hk4e_ugc）数据加载 ----
+// IPC 契约：READ_UGC_DATA / FETCH_UGC_DATA 传 { game, uid? }，
+// 返回 { ok: true, data } 或 { ok: false, error }。
+// data 为账号对象 { uid, timezone, lang, list[] }（list 为记录数组）或 null。
+// 独立的请求序号：快速切换游戏/账号时丢弃过期响应
+let ugcSeq = 0
+
+const applyUgcResult = (result) => {
+  if (result && result.ok) {
+    state.ugcData = result.data ?? null
+    state.ugcStatus = 'loaded'
+    state.ugcLog = ''
+  } else {
+    state.ugcData = null
+    state.ugcStatus = 'failed'
+    state.ugcLog = (result && result.error) || ''
+  }
+}
+
+const invokeUgc = async (channel) => {
+  if (state.game !== 'genshin') return
+  const seq = ++ugcSeq
+  state.ugcStatus = 'loading'
+  try {
+    const result = await ipcRenderer.invoke(channel, {
+      game: state.game,
+      uid: state.current || undefined
+    })
+    if (seq !== ugcSeq) return
+    applyUgcResult(result)
+  } catch (e) {
+    if (seq !== ugcSeq) return
+    // 渲染层先于主进程的 UGC handler 合并时，invoke 会抛
+    // "No handler registered"。此时保持 init 状态给出提示，而不是报错
+    if (String(e?.message || e).includes('No handler registered')) {
+      state.ugcStatus = 'init'
+      state.ugcData = null
+    } else {
+      state.ugcStatus = 'failed'
+      state.ugcLog = e?.message || String(e)
+    }
+  }
+}
+
+const readUgcData = async () => invokeUgc('READ_UGC_DATA')
+const fetchUgcData = async () => invokeUgc('FETCH_UGC_DATA')
+
+// 懒加载：首次切到千星奇域标签页时才读取本地数据
+watch(() => state.tab, (tab) => {
+  if (tab === 'ugc' && state.game === 'genshin' && state.ugcStatus === 'init') {
+    readUgcData()
+  }
+})
+
+const resetUgcState = () => {
+  ugcSeq++
+  state.ugcData = null
+  state.ugcStatus = 'init'
+  state.ugcLog = ''
+}
+
 const changeGame = async (gameId) => {
-  const data = await ipcRenderer.invoke('SWITCH_GAME', gameId)
-  if (data) {
-    applyData(data)
-    state.status = data.dataMap.get(data.current) ? 'loaded' : 'init'
-    state.authkeyTimeout = false
-    state.log = ''
+  // 快速连续切换游戏时，旧请求可能晚于新请求返回，
+  // 复用 loadSeq 丢弃过期的 SWITCH_GAME 响应
+  const seq = ++loadSeq
+  try {
+    const data = await ipcRenderer.invoke('SWITCH_GAME', gameId)
+    if (seq !== loadSeq) return
+    if (data) {
+      applyData(data)
+      state.status = data.dataMap.get(data.current) ? 'loaded' : 'init'
+      state.authkeyTimeout = false
+      state.log = ''
+    }
+  } catch (e) {
+    if (seq !== loadSeq) return
+    state.status = 'failed'
+    state.log = e?.message || String(e)
+    return
+  }
+  // 离开原神：千星奇域标签页已隐藏，重置选中标签与 UGC 状态
+  if (gameId !== 'genshin') {
+    if (state.tab === 'ugc') state.tab = 'stats'
+    resetUgcState()
+  } else if (state.tab === 'ugc') {
+    // 回到原神且停留在该标签页：立即读取
+    readUgcData()
   }
   await getI18nData()
   await updateConfig()
@@ -299,17 +403,29 @@ const changeGame = async (gameId) => {
 }
 
 const getI18nData = async () => {
-  const data = await ipcRenderer.invoke('I18N_DATA')
-  if (data) {
-    state.i18n = data
-    setTitle()
+  try {
+    const data = await ipcRenderer.invoke('I18N_DATA')
+    if (data) {
+      state.i18n = data
+      setTitle()
+    }
+    // 切换语言后 gameInfo（卡池类型名等）仍停留在旧语言，
+    // 必须同步刷新，否则要等切游戏或重启才更新
+    await updateConfig()
+  } catch (e) {
+    console.error('load i18n failed', e)
   }
   // 卡池名称跟随语言，切换语言后刷新统计
   await loadWaiwai()
 }
 
 const saveExcel = async () => {
-  await ipcRenderer.invoke('SAVE_EXCEL')
+  try {
+    await ipcRenderer.invoke('SAVE_EXCEL')
+  } catch (e) {
+    console.error('save excel failed', e)
+    ElMessage.error(e?.message || String(e))
+  }
 }
 
 const exportUIGFJSON = () => {
@@ -359,13 +475,22 @@ const exportUIGFJSON = () => {
 
 const importData = async () => {
   state.status = 'loading'
-  const data = await ipcRenderer.invoke('IMPORT_UIGF_JSON')
-  if (data) {
-    applyData(data)
-    state.status = 'loaded'
-    await loadWaiwai()
-  } else {
+  try {
+    const data = await ipcRenderer.invoke('IMPORT_UIGF_JSON')
+    if (data) {
+      applyData(data)
+      state.status = 'loaded'
+      await loadWaiwai()
+    } else {
+      state.status = 'failed'
+    }
+    // UIGF 导入可能包含 hk4e_ugc 段：原神下重读千星奇域数据
+    if (state.game === 'genshin') {
+      await readUgcData()
+    }
+  } catch (e) {
     state.status = 'failed'
+    state.log = e?.message || String(e)
   }
 }
 
@@ -380,7 +505,12 @@ const exportCommand = (type) => {
 }
 
 const openCacheFolder = async () => {
-  await ipcRenderer.invoke('OPEN_CACHE_FOLDER')
+  try {
+    await ipcRenderer.invoke('OPEN_CACHE_FOLDER')
+  } catch (e) {
+    console.error('open cache folder failed', e)
+    ElMessage.error(e?.message || String(e))
+  }
 }
 
 const changeCurrent = async (uid) => {
@@ -390,8 +520,16 @@ const changeCurrent = async (uid) => {
     state.status = 'loaded'
   }
   state.current = uid
-  await ipcRenderer.invoke('CHANGE_UID', uid)
+  try {
+    await ipcRenderer.invoke('CHANGE_UID', uid)
+  } catch (e) {
+    console.error('change uid failed', e)
+  }
   await loadWaiwai()
+  // 千星奇域数据按 uid 存取，切换账号后重读
+  if (state.game === 'genshin' && state.tab === 'ugc') {
+    await readUgcData()
+  }
 }
 
 const newUser = async () => {
@@ -399,7 +537,12 @@ const newUser = async () => {
 }
 
 const relaunch = async () => {
-  await ipcRenderer.invoke('RELAUNCH')
+  try {
+    await ipcRenderer.invoke('RELAUNCH')
+  } catch (e) {
+    console.error('relaunch failed', e)
+    ElMessage.error(e?.message || String(e))
+  }
 }
 
 const maskUid = (uid) => {
@@ -437,29 +580,44 @@ const setTitle = () => {
 }
 
 const updateConfig = async () => {
-  const config = await ipcRenderer.invoke('GET_CONFIG')
-  state.config = config
-  state.gameInfo = config.gameInfo
-  if (config.game && config.game !== state.game) {
-    state.game = config.game
+  try {
+    const config = await ipcRenderer.invoke('GET_CONFIG')
+    state.config = config
+    state.gameInfo = config.gameInfo
+    if (config.game && config.game !== state.game) {
+      state.game = config.game
+    }
+  } catch (e) {
+    // 配置读取失败时保留现有状态，避免把 gameInfo 清空导致渲染层连锁异常
+    console.error('load config failed', e)
   }
 }
 
 const copyUrl = async () => {
-  const successed = await ipcRenderer.invoke('COPY_URL')
-  if (successed) {
-    ElMessage.success(ui.value.extra.urlCopied)
-  } else {
-    ElMessage.error(state.i18n.log.url.notFound)
+  try {
+    const successed = await ipcRenderer.invoke('COPY_URL')
+    if (successed) {
+      ElMessage.success(ui.value.extra.urlCopied)
+    } else {
+      ElMessage.error(state.i18n.log.url.notFound)
+    }
+  } catch (e) {
+    console.error('copy url failed', e)
+    ElMessage.error(e?.message || String(e))
   }
 }
 
 const copyApiUrl = async () => {
-  const successed = await ipcRenderer.invoke('COPY_API_URL')
-  if (successed) {
-    ElMessage.success(ui.value.extra.apiUrlCopied)
-  } else {
-    ElMessage.error(state.i18n.log.url.notFound)
+  try {
+    const successed = await ipcRenderer.invoke('COPY_API_URL')
+    if (successed) {
+      ElMessage.success(ui.value.extra.apiUrlCopied)
+    } else {
+      ElMessage.error(state.i18n.log.url.notFound)
+    }
+  } catch (e) {
+    console.error('copy api url failed', e)
+    ElMessage.error(e?.message || String(e))
   }
 }
 
@@ -482,13 +640,16 @@ const ipcHandlers = {
 }
 
 onMounted(async () => {
-  await updateConfig()
-  await readData()
-  await getI18nData()
-
+  // IPC 监听器必须先于任何 await 注册：
+  // 主进程可能在首个 await（updateConfig/readData）期间就发出
+  // LOAD_DATA_STATUS / ERROR，晚注册会丢失启动期进度与错误事件
   for (const [channel, handler] of Object.entries(ipcHandlers)) {
     ipcRenderer.on(channel, handler)
   }
+
+  await updateConfig()
+  await readData()
+  await getI18nData()
 
   // 按设置中的间隔自动同步卡池数据（失败不影响其它功能）
   ipcRenderer.invoke('MAYBE_SYNC_BANNERS', state.game).catch(() => {})

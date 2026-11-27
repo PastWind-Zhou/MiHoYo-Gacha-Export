@@ -81,7 +81,9 @@ const parseData = (detail, type) => {
 };
 
 let pieChart = null;
-const updateChart = throttle(() => {
+// 内容渲染：数据/账号/语言切换是低频事件，直接同步渲染。
+// 之前把渲染也放进 throttle(1000)，切换账号/语言后图表最多延迟 1 秒更新
+const renderChart = () => {
   if (!pieChart) {
     pieChart = init(chart.value);
   }
@@ -131,14 +133,21 @@ const updateChart = throttle(() => {
   if (canResize(pieChart, chart.value)) {
     pieChart.resize();
   }
-}, 1000);
+};
+
+// 仅用于窗口 resize 这类高频事件：节流避免拖拽窗口时连续重绘
+const updateChart = throttle(() => {
+  if (canResize(pieChart, chart.value)) {
+    pieChart.resize();
+  }
+}, 200);
 
 onUpdated(() => {
-  updateChart();
+  renderChart();
 });
 
 onMounted(() => {
-  updateChart();
+  renderChart();
   window.addEventListener("resize", updateChart);
 
   // 监听容器尺寸：隐藏→显示 时 ECharts 已把 canvas 清空，这里补一次 resize。
