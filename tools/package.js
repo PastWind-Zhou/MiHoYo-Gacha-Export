@@ -21,8 +21,8 @@ const isProductVersionDir = (name) =>
 const version = pkg.version
 const releaseDir = path.join(root, 'release')
 // 免安装目录名与压缩包名保持一致（去掉 .zip 后缀）：
-//   release/MiHoYoGachaExport-1.0.1-win/     ← 本地可直接运行
-//   release/MiHoYoGachaExport-1.0.1-win.zip  ← 解压后得到同名文件夹
+//   release/MiHoYoGachaExport-1.0.2-win/     ← 本地可直接运行
+//   release/MiHoYoGachaExport-1.0.2-win.zip  ← 解压后得到同名文件夹
 const stage = path.join(releaseDir, `${productName}-${version}-win`)
 const appZip = path.join(releaseDir, `${productName}-${version}-win.zip`)
 // 需要保留的目录：备份与临时目录在打包过程中不能被清理掉，
@@ -228,7 +228,7 @@ if (fs.existsSync(userDataBackup)) {
 }
 
 // 4.5 写入构建标识
-//     版本号不变时（如 1.0.1 覆盖重发），用户无法分辨新旧包。
+//     版本号不变时（如 1.0.2 覆盖重发），用户无法分辨新旧包。
 //     记录构建时间并在窗口标题显示，用户一眼就能确认手上的是哪个包。
 const buildInfo = {
   version,
@@ -271,7 +271,7 @@ const zipWithRetry = (source, dest, keepRoot = false) => {
 
 log('压缩程序包（Windows 原生 ZipFile）…')
 try {
-  // keepRoot=true：压缩目录本身，zip 内含顶层文件夹 MiHoYoGachaExport-1.0.1-win/
+  // keepRoot=true：压缩目录本身，zip 内含顶层文件夹 MiHoYoGachaExport-1.0.2-win/
   // 解压后得到一个同名文件夹，而不是一堆文件散在根目录
   zipWithRetry(stage, appZip, true)
 } catch (e) {

@@ -1,6 +1,6 @@
 {
   "name": "mihoyo-gacha-export",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "main": "./dist/electron/main/main.js",
   "author": "PastWind <https://github.com/PastWind-Zhou>",
   "homepage": "https://github.com/PastWind-Zhou/MiHoYo-Gacha-Export",
