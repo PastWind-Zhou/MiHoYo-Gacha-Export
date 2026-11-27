@@ -157,7 +157,9 @@ const settingForm = reactive({
   lang: 'zh-cn',
   logType: 1,
   proxyMode: true,
-  autoUpdate: true,
+  // 占位值与 config.js 默认值保持一致（默认不自动下载安装），
+  // GET_CONFIG 返回后再覆盖为真实配置，避免开关短暂闪动
+  autoUpdate: false,
   fetchFullHistory: false,
   hideNovice: true,
   hideStandard: false

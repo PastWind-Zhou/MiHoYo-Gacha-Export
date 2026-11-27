@@ -13,6 +13,9 @@ const AdmZip = require('adm-zip')
 const { sha256File } = require('./dataGuard')
 
 const PRODUCT_NAME = 'MiHoYoGachaExport'
+// tag_name 必须是严格的稳定版本号（可带 v 前缀）。
+// 预发布 / 后续版本等松散标题一律拒绝，避免手动更新误装预发布包。
+const TAG_RE = /^v?\d+\.\d+\.\d+$/i
 
 // 单次请求（release 元数据）的超时
 const API_TIMEOUT = 15 * 1000
@@ -38,6 +41,11 @@ const fetchLatestRelease = async (apiUrl, version) => {
   const release = await res.json()
   if (!release || !release.tag_name) {
     throw new Error('release 数据无效')
+  }
+  if (!TAG_RE.test(String(release.tag_name).trim())) {
+    // 只允许 v1.0.2 / 1.0.2 这类稳定版本号；
+    // "v1.0.2 Pre-release"、"v1.0.2-beta.1"、"1.0.2 后续版本" 全部 fail closed
+    throw new Error('release tag_name 不是合法的稳定版本号，已拒绝')
   }
   return release
 }

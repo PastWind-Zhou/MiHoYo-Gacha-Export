@@ -150,6 +150,53 @@ describe('千星奇域数据链路（ugcData）', () => {
     expect(saveJSON).not.toHaveBeenCalled()
   })
 
+  test('loadUGCAccounts 跳过非法 uid 文件并记脱敏警告，不读取 genshin 目录外数据', async () => {
+    // 目录外即使存在同名账号数据也不能被读入
+    await fs.writeJSON(path.join(USER_DATA, 'config.json'), { uid: '123456789', list: [] })
+    // 文件名非纯数字：匹配不上 ugc-list-<digits>.json
+    await fs.writeJSON(path.join(USER_DATA, 'genshin', 'ugc-list-abc.json'), {
+      uid: '../../config', list: []
+    })
+    // 文件名合法但内容 uid 是穿越形态：normalizeUGCAccount 必须拒绝
+    await fs.writeJSON(path.join(USER_DATA, 'genshin', 'ugc-list-123456789.json'), {
+      uid: '../../config', list: []
+    })
+    const accounts = await ugcData.loadUGCAccounts()
+    expect(accounts).toEqual([])
+    expect(sendMsg).toHaveBeenCalledWith(expect.stringContaining('uid 非法'), 'ERROR')
+    // 警告不得把 userData 绝对路径外泄给渲染层/日志
+    for (const [text] of sendMsg.mock.calls) {
+      expect(String(text)).not.toContain(USER_DATA)
+    }
+  })
+
+  test('loadUGCAccounts 遇到损坏 JSON 记脱敏警告，并继续读取其余账号', async () => {
+    await fs.writeFile(path.join(USER_DATA, 'genshin', 'ugc-list-123456789.json'), '{broken', 'utf8')
+    await fs.writeJSON(path.join(USER_DATA, 'genshin', 'ugc-list-987654321.json'), {
+      uid: '987654321', timezone: 8, lang: 'zh-cn', list: []
+    })
+    const accounts = await ugcData.loadUGCAccounts()
+    expect(accounts.map(a => a.uid)).toEqual(['987654321'])
+    expect(sendMsg).toHaveBeenCalledWith(expect.stringContaining('读取失败'), 'ERROR')
+    for (const [text] of sendMsg.mock.calls) {
+      expect(String(text)).not.toContain(USER_DATA)
+    }
+  })
+
+  test('READ_UGC_DATA 在 currents 畸形导致 config.current 抛错时仍返回结构化结果', async () => {
+    const original = Object.getOwnPropertyDescriptor(config, 'current')
+    Object.defineProperty(config, 'current', {
+      configurable: true,
+      get () { throw new TypeError("Cannot read properties of null (reading 'genshin')") }
+    })
+    try {
+      const res = await handler('READ_UGC_DATA')({}, { game: 'genshin' })
+      expect(res).toEqual({ ok: true, data: null })
+    } finally {
+      Object.defineProperty(config, 'current', original)
+    }
+  })
+
   test('FETCH_UGC_DATA 复用 authkey 分页抓取，落盘独立文件并返回账号对象', async () => {
     request.mockImplementation(async (url) => {
       if (url.includes('getConfigList')) return { retcode: 0, data: {} }

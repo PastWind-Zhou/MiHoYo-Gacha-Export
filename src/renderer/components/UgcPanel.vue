@@ -86,7 +86,9 @@ const count4 = computed(() => countOf('4'))
 const count3 = computed(() => countOf('3'))
 
 const percent = (num) => {
-  const total = records.length
+  // records 是 computed ref，必须取 .value；直接 records.length 恒为 undefined，
+  // 会让 5/4 星占比永远显示 0%
+  const total = records.value.length
   if (!total) return '0%'
   return `${Math.round(num / total * 10000) / 100}%`
 }

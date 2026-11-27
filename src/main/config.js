@@ -9,7 +9,9 @@ const config = {
   lang: detectLocale(),
   proxyPort: 8325,
   proxyMode: false,
-  autoUpdate: true,
+  // 默认关闭：静默自动下载/安装旧版本用户未显式同意的包风险过高，
+  // 由用户在设置页主动开启；已有 config.json 里的 true 会被正常加载保留
+  autoUpdate: false,
   // 自动更新状态键：首次启动即可从磁盘读到默认值，
   // 避免 update 模块读到 undefined 后按错误分支处理（team-lead 协调项）
   skipVersion: '',
@@ -38,15 +40,16 @@ const getLocalConfig = async () => {
       configTemp[key] = localConfig[key]
     }
   }
-  if (configTemp.urls) {
-    configTemp.urls.forEach(item => {
-      try {
-        item[1] = decipherAes(item[1])
-      } catch (e) {
-        item[1] = ''
-      }
-    })
-  }
+  // urls 可能被手改 / 旧版残留成非数组；直接 forEach 会抛 TypeError 让
+  // ready reject，所有 await config.ready 的入口都会失效。非数组一律回退空数组。
+  configTemp.urls = Array.isArray(configTemp.urls) ? configTemp.urls : []
+  configTemp.urls.forEach(item => {
+    try {
+      item[1] = decipherAes(item[1])
+    } catch (e) {
+      item[1] = ''
+    }
+  })
   // null / 空串也要回退：只判断真值时，games[null] 会让整个抓取链路崩溃
   if (!isValidGame(configTemp.game)) {
     configTemp.game = 'hkrpg'

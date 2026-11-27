@@ -9,10 +9,23 @@ const { isProductVersionDir } = require('./paths')
 
 describe('isProductVersionDir', () => {
   test('接受本产品的版本目录', () => {
+    expect(isProductVersionDir('MiHoYoGachaExport-1.0')).toBe(true)
     expect(isProductVersionDir('MiHoYoGachaExport-1.0.1')).toBe(true)
     expect(isProductVersionDir('MiHoYoGachaExport-1.0.1-win')).toBe(true)
-    expect(isProductVersionDir('MiHoYoGachaExport-1.0.1-source')).toBe(true)
     expect(isProductVersionDir('MiHoYoGachaExport-2.0.0')).toBe(true)
+  })
+
+  test('接受带平台后缀的版本目录（含多段后缀）', () => {
+    expect(isProductVersionDir('MiHoYoGachaExport-1.0.2-win-x64')).toBe(true)
+    expect(isProductVersionDir('MiHoYoGachaExport-1.0.2-win-ia32')).toBe(true)
+    expect(isProductVersionDir('MiHoYoGachaExport-1.0.2-win-arm64')).toBe(true)
+    expect(isProductVersionDir('MiHoYoGachaExport-1.0.2-mac')).toBe(true)
+  })
+
+  test('拒绝 -source 源码包目录（GitHub 自动生成，不是旧版本数据）', () => {
+    expect(isProductVersionDir('MiHoYoGachaExport-1.0.1-source')).toBe(false)
+    expect(isProductVersionDir('MiHoYoGachaExport-1.0.2-win-source')).toBe(false)
+    expect(isProductVersionDir('MiHoYoGachaExport-1.0.2-SOURCE')).toBe(false)
   })
 
   test('拒绝无关目录（即使含 gacha 字样）', () => {
@@ -29,6 +42,14 @@ describe('isProductVersionDir', () => {
     expect(isProductVersionDir('')).toBe(false)
     expect(isProductVersionDir(null)).toBe(false)
     expect(isProductVersionDir(undefined)).toBe(false)
+    expect(isProductVersionDir(123)).toBe(false)
+  })
+
+  test('拒绝畸形后缀', () => {
+    expect(isProductVersionDir('MiHoYoGachaExport-1.0.2-')).toBe(false)
+    expect(isProductVersionDir('MiHoYoGachaExport-1.0.2--win')).toBe(false)
+    expect(isProductVersionDir('MiHoYoGachaExport-1.0.2-win.zip')).toBe(false)
+    expect(isProductVersionDir('MiHoYoGachaExport-abc')).toBe(false)
   })
 })
 

@@ -116,3 +116,47 @@ test('mergeData 保留本地独有的池', () => {
   expect(merged.has('999')).toBe(true)
   expect(merged.get('999')).toEqual([{ id: '2' }])
 })
+
+// 回归：旧 JSON 的 uid 是数字、抓取接口返回字符串时，
+// !== 会把同一账号判成两个 uid，直接返回 origin.result 丢掉本地记录
+test('mergeData 归一 uid 类型，数字 local 与字符串 origin 视为同一账号', () => {
+  const local = {
+    uid: 123456,
+    result: new Map([['1000', [{ id: '1', name: '本地' }]]])
+  }
+  const origin = {
+    uid: '123456',
+    result: new Map([['1000', [{ id: '2', name: '远程' }]]])
+  }
+  const merged = mergeData(local, origin)
+  expect(merged.get('1000').map(item => item.id).sort()).toEqual(['1', '2'])
+})
+
+// 反向：字符串 local 与数字 origin 同样合并，且保留双方记录
+test('mergeData 归一 uid 类型，字符串 local 与数字 origin 视为同一账号', () => {
+  const local = {
+    uid: '123456',
+    result: new Map([['1000', [{ id: '1', name: '本地' }]]])
+  }
+  const origin = {
+    uid: 123456,
+    result: new Map([['1000', [{ id: '2', name: '远程' }]]])
+  }
+  const merged = mergeData(local, origin)
+  expect(merged.get('1000').map(item => item.id).sort()).toEqual(['1', '2'])
+})
+
+// 合并方向：uid 确实不同时仍只取 origin，不能把别的账号混进来
+test('mergeData 对不同 uid 仍只保留 origin 数据', () => {
+  const local = {
+    uid: 123456,
+    result: new Map([['1000', [{ id: '1', name: '本地' }]]])
+  }
+  const origin = {
+    uid: '654321',
+    result: new Map([['1000', [{ id: '2', name: '远程' }]]])
+  }
+  const merged = mergeData(local, origin)
+  expect(merged).toBe(origin.result)
+  expect(merged.get('1000')).toEqual([{ id: '2', name: '远程' }])
+})

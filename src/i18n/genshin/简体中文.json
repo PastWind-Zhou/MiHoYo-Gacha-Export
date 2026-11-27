@@ -248,5 +248,10 @@
   "ui.ugc.type2000": "奇域祈愿·二",
   "ui.ugc.poolUnknown": "未知卡池",
   "ui.button.ugcRefresh": "刷新",
-  "ui.button.ugcUpdate": "获取奇域数据"
+  "ui.button.ugcUpdate": "获取奇域数据",
+  "ui.setting.autoUpdateHint": "开启后会在启动时自动检查新版本，也可以在这里手动检查或立即更新。",
+  "ui.update.banner": "发现新版本，建议更新",
+  "ui.update.lastCheckNever": "从未检查",
+  "ui.ugc.errorEmptyUid": "无法确定千星奇域账号 uid",
+  "ui.ugc.errorInvalidUid": "千星奇域账号 uid 无效"
 }

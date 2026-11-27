@@ -144,13 +144,17 @@ const checkUpdate = async (manual = true) => {
       })
       sendStatus('available')
     } else {
-      Object.assign(updateInfo, { available: false, version: latest, message })
+      Object.assign(updateInfo, { available: false, version: latest, message, notes: '' })
       sendStatus('idle')
     }
-    const result = { ok: true, available, version: latest, message }
+    // CHECK_UPDATE 的 data 必须是完整 publicInfo()：渲染层 setUpdateResult
+    // 用 IPC 返回值覆盖 UPDATE_STATUS 推来的快照，精简字段会把 status 退回
+    // init、notes 清空。available / version / message 都已包含在 publicInfo 中。
+    const result = Object.assign({ ok: true }, publicInfo())
     if (available && !manual) {
       // 自动模式：检测到更新直接走完整流程（下载→校验→备份→暂存→重启）
-      return Object.assign(result, await startUpdate())
+      // 先并入 startUpdate 的 ok/error，再用最新 publicInfo() 刷新状态快照
+      return Object.assign(result, await startUpdate(), publicInfo())
     }
     return result
   } catch (e) {
@@ -245,7 +249,9 @@ const startUpdate = async () => {
     // 留出短暂时间让渲染层收到 ready 状态再重启
     await new Promise((resolve) => setTimeout(resolve, 1200))
     relaunchApp(target)
-    return { ok: true, version }
+    // 返回完整快照：渲染层用它覆盖 UPDATE_STATUS 推送，
+    // 精简的 { version } 会把 status='ready' 退回 init 并清空 notes/progress
+    return Object.assign({ ok: true }, publicInfo())
   } catch (e) {
     // 任意阶段失败：旧版本原样保留（上面没有任何步骤改动旧目录），
     // 状态落盘让下次启动时能提示失败原因

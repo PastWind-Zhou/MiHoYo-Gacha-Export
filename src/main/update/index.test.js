@@ -127,6 +127,22 @@ describe('IPC contract', () => {
     expect(index.publicInfo().error).toBe('')
   })
 
+  test('CHECK_UPDATE data is the full publicInfo snapshot (status/notes/progress kept)', async () => {
+    downloader.fetchLatestRelease.mockResolvedValue(makeRelease('1.0.2'))
+    const result = await handlers.CHECK_UPDATE()
+    // 渲染层用 IPC data 覆盖 UPDATE_STATUS 推来的快照，必须字段齐全
+    expect(result.data).toEqual(index.publicInfo())
+    expect(result.data).toEqual(expect.objectContaining({
+      status: 'available',
+      available: true,
+      version: '1.0.2',
+      notes: 'release notes',
+      progress: 0,
+      message: '',
+      currentVersion: '1.0.1'
+    }))
+  })
+
   test('failed CHECK_UPDATE exposes error through both result and GET_UPDATE_INFO', async () => {
     downloader.fetchLatestRelease.mockRejectedValue(new Error('network down'))
     await expect(handlers.CHECK_UPDATE()).resolves.toEqual({ ok: false, error: 'network down' })
@@ -158,6 +174,10 @@ describe('checkUpdate', () => {
     expect(result.ok).toBe(true)
     expect(result.data.available).toBe(false)
     expect(result.data.version).toBe('1.0.1')
+    // 无更新也要回完整快照，且不能把上一次的 notes 带回来
+    expect(result.data).toEqual(index.publicInfo())
+    expect(result.data.status).toBe('idle')
+    expect(result.data.notes).toBe('')
     expect(config.set).toHaveBeenCalledWith('lastUpdateCheck', expect.any(Number))
     expect(config.save).toHaveBeenCalled()
   })
@@ -177,6 +197,27 @@ describe('checkUpdate', () => {
     expect(result.data.available).toBe(false)
     expect(result.data.message).toContain('sha256')
     expect(downloader.downloadFile).not.toHaveBeenCalled()
+  })
+
+  test('fail closed when the chosen zip asset has a malformed digest', async () => {
+    const release = makeRelease('1.0.2')
+    release.assets[0].digest = 'sha256:not-a-hex'
+    downloader.fetchLatestRelease.mockResolvedValue(release)
+    const result = await handlers.CHECK_UPDATE()
+    // 有合法命名的 win zip，但 digest 格式不对 → 仍必须不可用
+    expect(result.data.available).toBe(false)
+    expect(result.data.message).toContain('sha256')
+    expect(downloader.downloadFile).not.toHaveBeenCalled()
+  })
+
+  test('a valid digest makes the same zip asset available', async () => {
+    const release = makeRelease('1.0.2')
+    release.assets[0].digest = `sha256:${'b'.repeat(64)}`
+    downloader.fetchLatestRelease.mockResolvedValue(release)
+    const result = await handlers.CHECK_UPDATE()
+    expect(result.data.available).toBe(true)
+    expect(result.data.version).toBe('1.0.2')
+    // digest 只存在于内存 updateInfo（不对外暴露），available=true 即证明它通过了校验
   })
 
   test('no platform asset → unavailable', async () => {
@@ -219,7 +260,16 @@ describe('APPLY_UPDATE', () => {
     })
 
     const result = await handlers.APPLY_UPDATE()
-    expect(result).toEqual({ ok: true, data: { version: '1.0.2' } })
+    // ready 状态必须随返回值一起交给渲染层，否则会被精简 data 覆盖成 init
+    expect(result.ok).toBe(true)
+    expect(result.data).toEqual(index.publicInfo())
+    expect(result.data).toEqual(expect.objectContaining({
+      status: 'ready',
+      available: true,
+      version: '1.0.2',
+      notes: 'release notes',
+      progress: 0
+    }))
 
     const target = path.join(path.dirname(paths.appRoot), 'MiHoYoGachaExport-1.0.2-win')
     expect(electron.app.relaunch).toHaveBeenCalledWith({

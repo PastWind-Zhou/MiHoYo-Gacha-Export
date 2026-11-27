@@ -27,10 +27,32 @@ describe('自动更新默认键', () => {
   test('首次启动即可读到 autoUpdate / skipVersion / lastUpdateCheck / updateState', async () => {
     const { config } = loadConfig(null)
     await config.ready
-    expect(config.autoUpdate).toBe(true)
+    expect(config.autoUpdate).toBe(false)
     expect(config.skipVersion).toBe('')
     expect(config.lastUpdateCheck).toBe(0)
     expect(config.updateState).toBe('init')
+  })
+
+  test('config.json 中已有的 autoUpdate:true 应被保留，不被默认值覆盖', async () => {
+    const { config } = loadConfig({ autoUpdate: true })
+    await config.ready
+    expect(config.autoUpdate).toBe(true)
+  })
+})
+
+describe('config.urls 容错', () => {
+  test('urls 为 {} / 字符串等非数组时 ready 仍 resolve 且回退空数组', async () => {
+    for (const bad of [{}, 'bad', 123, null]) {
+      const { config } = loadConfig({ urls: bad })
+      await expect(config.ready).resolves.toBeUndefined()
+      expect(config.urls.size).toBe(0)
+    }
+  })
+
+  test('合法 urls 数组仍正常解密', async () => {
+    const { config } = loadConfig({ urls: [[123, 'YXV0aGtleQ==']] })
+    await config.ready
+    expect(config.urls.get(123)).toBe('authkey')
   })
 })
 

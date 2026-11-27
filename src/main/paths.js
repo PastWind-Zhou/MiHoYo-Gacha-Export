@@ -88,11 +88,17 @@ const latestMtime = (dir) => {
 // 也吸进来 —— 用户解压新包后莫名其妙冒出「别人的」抽卡记录就是这个原因。
 const PRODUCT_NAME = 'MiHoYoGachaExport'
 
+// 产品名 + 数字版本 + 可选平台后缀（1.0 / 1.0.1 / 1.0.2-win / 1.0.2-win-x64 / 1.0.2-win-ia32）。
+// 与 tools/package.js 的 isProductVersionDir 保持一致，改动时两处同步。
+const PRODUCT_VERSION_DIR_RE = new RegExp(
+  `^${PRODUCT_NAME}-\\d+(?:\\.\\d+){1,2}(?:-[A-Za-z0-9][\\w-]*)?$`
+)
 const isProductVersionDir = (name) => {
-  if (!name) return false
-  if (!name.startsWith(PRODUCT_NAME)) return false
-  // 后面必须是版本号（1.0 / 1.0.1 / 1.0.1-win / 1.0.1-win-x64 / 1.0.1-source）
-  return /^MiHoYoGachaExport-\d+(?:\.\d+){1,2}(?:-[\w-]+)?$/.test(name)
+  if (typeof name !== 'string') return false
+  if (!PRODUCT_VERSION_DIR_RE.test(name)) return false
+  // -source 是 GitHub 自动生成的源码包，不是旧版本数据目录，不能作为迁移来源
+  if (/-source$/i.test(name)) return false
+  return true
 }
 
 const findUserDataIn = (root, nameFilter) => {

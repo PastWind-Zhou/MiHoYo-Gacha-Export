@@ -5,7 +5,7 @@
 //   结束时间是权威值；起始缺失时由同 channel 上一期的结束时间推定
 // 复用统一带响应体积上限的取文本函数：中文页面按字符计会严重低估实际字节数，
 // 8MB 上限必须用 Buffer.byteLength 判断
-const fetchText = require('./bannerSource').fetchText
+const { fetchText } = require('./fetchText')
 
 const SOURCES = {
   genshin: 'https://wiki.biligame.com/ys/%E5%BE%80%E6%9C%9F%E7%A5%88%E6%84%BF',

@@ -46,9 +46,10 @@ const mergeList = (a, b) => {
 const mergeData = (local, origin) => {
   if (local && local.result) {
     const localResult = local.result
-    const localUid = local.uid
-    const originUid = origin.uid
-    if (localUid !== originUid) return origin.result
+    // 旧版 JSON 的 uid 可能是数字，抓取接口/UIGF 导入则多为字符串。
+    // ===/!== 区分类型，同账号会被判成两个 uid 并直接返回 origin.result，
+    // 本地记录被整份丢弃。统一按字符串比较，data.uid 本身保持原值。
+    if (String(local.uid) !== String(origin.uid)) return origin.result
     const originResult = new Map()
     // 取两侧池键的并集：只遍历 origin 会把本地独有的池静默丢掉
     const keys = new Set([...origin.result.keys(), ...localResult.keys()])

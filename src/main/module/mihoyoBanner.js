@@ -18,7 +18,7 @@
 // 无需登录、无需 DS 签名。
 
 // 复用带字节上限的取文本实现：中文公告按字符计会让 8MB 上限失效
-const fetchText = require('./bannerSource').fetchText
+const { fetchText } = require('./fetchText')
 
 const APP_SN = {
   nap: 'zzz_wiki',

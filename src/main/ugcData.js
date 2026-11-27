@@ -128,20 +128,32 @@ const getUGCLogs = async ({ name, type, url }) => {
 
 const ugcDir = () => path.join(userDataPath, UGC_DIR)
 
-// 读取全部千星奇域账号（导出 UIGF 时也走这里）
+// 读取全部千星奇域账号（导出 UIGF 时也走这里）。
+// 目标目录固定为 userData/genshin，且 uid 参与路径拼接前先过 isValidUid：
+// 文件名必须是 ugc-list-<纯数字 uid>.json，畸形的 ../ 穿越形态根本进不了循环。
 const loadUGCAccounts = async () => {
   const dir = ugcDir()
   await fs.ensureDir(dir)
   const files = await fs.readdir(dir)
   const accounts = []
   for (const fname of files) {
-    if (/^ugc-list-\d+\.json$/.test(fname)) {
-      try {
-        const account = await fs.readJSON(path.join(dir, fname))
-        const normalized = normalizeUGCAccount(account)
-        if (normalized) accounts.push(normalized)
-      } catch (e) {}
+    const match = /^ugc-list-(\d+)\.json$/.exec(fname)
+    if (!match || !isValidUid(match[1])) continue
+    let account = null
+    try {
+      account = await fs.readJSON(path.join(dir, fname))
+    } catch (e) {
+      // 脱敏：只暴露文件名，不把原始错误或绝对路径转发给渲染层/日志
+      sendMsg(`千星奇域数据文件读取失败：${fname}`, 'ERROR')
+      continue
     }
+    const normalized = normalizeUGCAccount(account)
+    if (!normalized) {
+      // uid 非法/缺失的旧数据同样只跳过，不能静默当作正常账号读入
+      sendMsg(`千星奇域数据文件 uid 非法，已跳过：${fname}`, 'ERROR')
+      continue
+    }
+    accounts.push(normalized)
   }
   return accounts
 }
@@ -227,7 +239,15 @@ const fetchUGCData = async (param = {}) => {
   // uid 优先级：接口记录（最权威）> 渲染层显式传入 > 当前原神账号。
   // 千星奇域接口不一定带 uid，回退逻辑与 getData.tryGetUid 保持一致
   if (!uid && isValidUid(uidParam)) uid = String(uidParam).trim()
-  if (!uid) uid = String(getData().current ?? '')
+  if (!uid) {
+    // getData().current 同样读 config.current，畸形 currents 会抛错；
+    // 这里兜住异常，交给下方统一的 isValidUid 判定「无法确定 uid」
+    try {
+      uid = String(getData().current ?? '')
+    } catch (e) {
+      uid = ''
+    }
+  }
   if (!isValidUid(uid)) {
     const message = '无法确定千星奇域账号 uid'
     sendMsg(message, 'ERROR')
@@ -249,10 +269,20 @@ const fetchUGCData = async (param = {}) => {
   return account
 }
 
+// config.current 由 Proxy 从 currents[game] 取值；config.json 若被写成
+// currents:null，getter 会抛 TypeError。UGC 读取不能被畸形配置阻断。
+const safeCurrentUid = () => {
+  try {
+    return config.current
+  } catch (e) {
+    return undefined
+  }
+}
+
 // 按 uid 取出内存中的账号，并统一经 normalizeUGCAccount 保证字段与导出格式一致。
 // uid 非法或不存在时返回 null（与 ugc-ui 契约的「无数据」语义一致）
 const getUGCAccount = (uid) => {
-  const target = String(uid ?? config.current ?? '').trim()
+  const target = String(uid ?? safeCurrentUid() ?? '').trim()
   if (!isValidUid(target)) return null
   const account = ugcMap.get(target)
   return account ? normalizeUGCAccount(account) : null

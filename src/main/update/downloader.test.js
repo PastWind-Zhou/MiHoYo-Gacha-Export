@@ -52,6 +52,18 @@ describe('fetchLatestRelease', () => {
     fetch.mockResolvedValue({ ok: true, json: async () => ({}) })
     await expect(fetchLatestRelease('https://example.test/latest', '1.0.1')).rejects.toThrow('release 数据无效')
   })
+
+  test('rejects pre-release and loose tag names (stable semver only)', async () => {
+    for (const tag of ['v1.0.2 Pre-release', 'v1.0.2-beta.1', '1.0.2 后续版本', 'release-1.0.2', 'latest']) {
+      fetch.mockResolvedValue({ ok: true, json: async () => ({ tag_name: tag, assets: [] }) })
+      await expect(fetchLatestRelease('https://example.test/latest', '1.0.1')).rejects.toThrow('不是合法的稳定版本号')
+    }
+    // 合法形态（带/不带 v 前缀、大小写 V）仍正常通过
+    for (const tag of ['v1.0.2', '1.0.2', 'V1.0.2']) {
+      fetch.mockResolvedValue({ ok: true, json: async () => ({ tag_name: tag, assets: [] }) })
+      await expect(fetchLatestRelease('https://example.test/latest', '1.0.1')).resolves.toEqual({ tag_name: tag, assets: [] })
+    }
+  })
 })
 
 describe('downloadFile', () => {

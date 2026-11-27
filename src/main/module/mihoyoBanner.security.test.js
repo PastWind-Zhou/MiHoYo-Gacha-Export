@@ -1,7 +1,7 @@
 // 米游社源：匹配不到时间区间时不再用同公告其它代号兜底（审计 2.17）
-jest.mock('./bannerSource', () => ({ fetchText: jest.fn() }))
+jest.mock('./fetchText', () => ({ fetchText: jest.fn() }))
 
-const fetchText = require('./bannerSource').fetchText
+const { fetchText } = require('./fetchText')
 const { fetchMihoyoBanners } = require('./mihoyoBanner')
 
 const POOL = {

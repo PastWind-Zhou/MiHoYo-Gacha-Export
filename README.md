@@ -72,7 +72,8 @@ release/MiHoYoGachaExport-<版本号>-win.zip  压缩包（不含 userData，Win
 >
 > **Release 构建号**：版本号不变时（如同一版本修复后覆盖重发），仅看版本号无法分辨新旧包。
 > 每次打包会在 `resources/app/build-info.json` 写入 `version` / `builtAt` / `buildId`
->（形如 `1.0.2-20261127220000`），设置页会显示「Version · Build」，据此可确认手上的包是哪次构建。
+>（`buildId` 形如 `<版本号>-<构建时间戳>`，**具体值以包内 `build-info.json` 为准**），
+> 设置页会显示「Version · Build」，据此可确认手上的包是哪次构建。
 >
 > `userData`（抽卡记录、设置）保存在**免安装目录内**，不随压缩包分发；重新打包时会自动保留，
 > 且打包前会先备份校验，备份不完整则中止打包，不会清理原有数据。

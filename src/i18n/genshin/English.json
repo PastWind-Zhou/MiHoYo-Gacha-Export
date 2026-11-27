@@ -248,5 +248,10 @@
   "ui.ugc.type2000": "UGC Wish II",
   "ui.ugc.poolUnknown": "Unknown pool",
   "ui.button.ugcRefresh": "Refresh",
-  "ui.button.ugcUpdate": "Fetch UGC Data"
+  "ui.button.ugcUpdate": "Fetch UGC Data",
+  "ui.setting.autoUpdateHint": "When enabled, new versions are checked at startup. You can also check or update manually here.",
+  "ui.update.banner": "New version available — update recommended",
+  "ui.update.lastCheckNever": "Never checked",
+  "ui.ugc.errorEmptyUid": "Unable to determine the UGC account UID",
+  "ui.ugc.errorInvalidUid": "Invalid UGC account UID"
 }

@@ -11,12 +11,18 @@ const root = path.resolve(__dirname, '..')
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 const productName = pkg.build.productName
 
-// 只认「本产品的版本目录」：目录名必须是 <productName>-<semver>[-后缀] 形式
-// （与 src/main/paths.js 的 isProductVersionDir 保持一致，改动时两处同步）。
+// 只认「本产品的版本目录」：<productName>-<数字版本>[-平台后缀] 形式。
+// 平台后缀形如 -win / -win-x64 / -win-ia32（可以带多段），但明确排除 -source：
+// 源码包由 GitHub 自动生成，不应被当旧版本数据目录。
+// 与 src/main/paths.js 的 isProductVersionDir 保持一致，改动时两处同步。
 // 早期实现用 /gacha/i 宽松匹配仓库父目录，会把名字含 gacha 的无关目录的
 // userData 也当成「本机最新数据」回填进发布目录 —— 他人数据被静默混入。
+const PRODUCT_VERSION_DIR_RE =
+  /^MiHoYoGachaExport-\d+(?:\.\d+){1,2}(?:-[A-Za-z0-9][\w-]*)?$/
 const isProductVersionDir = (name) =>
-  /^MiHoYoGachaExport-\d+\.\d+\.\d+(-[a-z]+)?$/.test(name)
+  typeof name === 'string' &&
+  PRODUCT_VERSION_DIR_RE.test(name) &&
+  !/-source$/i.test(name)
 
 const version = pkg.version
 const releaseDir = path.join(root, 'release')
@@ -50,6 +56,64 @@ const appDist = path.join(root, 'dist', 'electron')
 // 同步输出，避免进程被杀时丢日志
 const log = (...a) => fs.writeSync(1, '[package] ' + a.join(' ') + '\n')
 const warn = (...a) => fs.writeSync(2, '[package] ' + a.join(' ') + '\n')
+
+// 目录里是否有实际内容；读不到时保守地当作「有内容」，宁可中止也不误判为空。
+const dirHasContent = (dir, fsImpl = fs) => {
+  try {
+    if (!fsImpl.existsSync(dir)) return false
+    return fsImpl.readdirSync(dir).length > 0
+  } catch (e) {
+    return true
+  }
+}
+
+// 判断上次打包遗留的 _userData_backup 能否安全恢复到本次 stage。
+// 只做判断、绝不删除任何东西：这份备份可能是用户数据的唯一副本。
+//   { ok: true, reuse: false }  没有遗留备份，按常规扫描历史目录
+//   { ok: true, reuse: true }   有遗留备份且目标无冲突，保留并在步骤 4 放回 stage
+//   { ok: false, reason, ... }  不安全，调用方必须中止并给出明确路径指引
+const planBackupRecovery = ({ backupPath, stageUserDataPath, fsImpl = fs }) => {
+  if (!fsImpl.existsSync(backupPath)) return { ok: true, reuse: false }
+  let st
+  try {
+    st = fsImpl.statSync(backupPath)
+  } catch (e) {
+    return {
+      ok: false,
+      reason: `无法读取备份目录状态：${e.message}`,
+      backupPath
+    }
+  }
+  if (!st.isDirectory()) {
+    return { ok: false, reason: '备份路径不是目录', backupPath }
+  }
+  // 目标已有用户数据 → 恢复会覆盖/混淆，判定为不安全（绝不静默覆盖）
+  if (dirHasContent(stageUserDataPath, fsImpl)) {
+    return {
+      ok: false,
+      reason: '当前发布目录已存在用户数据',
+      backupPath,
+      targetPath: stageUserDataPath
+    }
+  }
+  return { ok: true, reuse: true, backupPath, targetPath: stageUserDataPath }
+}
+
+// 清理 release 下的旧产物，但保留 KEEP_NAMES（备份/临时目录）。
+// 返回删除失败项而不直接退出，便于调用方给出「备份已保留」的明确指引。
+const clearReleaseDir = ({ releaseDir, keepNames, fsImpl = fs }) => {
+  const problems = []
+  for (const name of fsImpl.readdirSync(releaseDir)) {
+    if (keepNames.has(name)) continue
+    const target = path.join(releaseDir, name)
+    try {
+      fsImpl.rmSync(target, { recursive: true, force: true })
+    } catch (e) {
+      problems.push({ name, message: e.message })
+    }
+  }
+  return problems
+}
 
 // 递归复制目录：逐文件复制。
 // 不使用 fs.cpSync —— 在部分环境下递归复制 electron 运行时会被中断。
@@ -114,6 +178,8 @@ const latestMtime = (dir) => {
   return latest
 }
 
+// 主流程单独包起来：被 require（单元测试）时不执行，只有直接 node tools/package.js 才跑。
+const main = () => {
 if (!fs.existsSync(path.join(appDist, 'main', 'main.js'))) {
   warn('缺少 dist/electron/main/main.js，请先执行：')
   warn('  node .electron-vite/build-main-only.js && node .electron-vite/build-renderer-only.js')
@@ -129,7 +195,24 @@ if (!electronDist) {
 //    扫描历史版本目录（build/ 与 release/ 都要看），取数据最新的一份，
 //    避免升级版本时丢数据。
 const userDataBackup = path.join(releaseDir, '_userData_backup')
-fs.rmSync(userDataBackup, { recursive: true, force: true })
+const stageUserData = path.join(stage, 'userData')
+
+// 绝不静默删除已存在的备份：它可能是上次打包失败后留下的唯一一份用户数据。
+// 先判断能否安全恢复到本次 stage；不能就中止，并明确给出备份/目标路径。
+const recovery = planBackupRecovery({
+  backupPath: userDataBackup,
+  stageUserDataPath: stageUserData
+})
+if (!recovery.ok) {
+  warn('检测到上次打包遗留的 userData 备份，但无法安全恢复到当前发布目录：' + recovery.reason)
+  warn('  备份路径：' + userDataBackup)
+  if (recovery.targetPath) warn('  目标路径：' + recovery.targetPath)
+  warn('  已中止打包，备份未被删除。请手动确认两处数据后再处理，不要直接删除备份。')
+  process.exit(1)
+}
+if (recovery.reuse) {
+  log('复用上次打包遗留的 userData 备份，将在本次打包中恢复到 ' + stageUserData)
+}
 
 const findUserDataDirs = () => {
   const dirs = []
@@ -169,36 +252,42 @@ const findUserDataDirs = () => {
     .map((x) => x.path)
 }
 
-const userDataDirs = findUserDataDirs()
-if (userDataDirs.length) {
-  const skipped = copyDir(userDataDirs[0], userDataBackup)
-  if (skipped.length) {
-    // 备份不完整就必须中止：后续步骤会清空 release/ 并删除原 release 目录，
-    // 一旦跳过的文件里有抽卡记录或 config，继续执行等于把用户数据永久删掉
-    warn('备份 userData 时有 ' + skipped.length + ' 项未复制，已中止打包：')
-    skipped.slice(0, 5).forEach((s) => warn('  ' + s))
-    warn('原始数据仍在：' + userDataDirs[0])
-    warn('请关闭正在运行的程序后重试')
-    process.exit(1)
+// 有遗留备份时直接复用，不再扫描历史目录覆盖它（安全第一，避免丢唯一副本）
+if (!recovery.reuse) {
+  const userDataDirs = findUserDataDirs()
+  if (userDataDirs.length) {
+    const skipped = copyDir(userDataDirs[0], userDataBackup)
+    if (skipped.length) {
+      // 备份不完整就必须中止：后续步骤会清空 release/ 并删除原 release 目录，
+      // 一旦跳过的文件里有抽卡记录或 config，继续执行等于把用户数据永久删掉
+      warn('备份 userData 时有 ' + skipped.length + ' 项未复制，已中止打包：')
+      skipped.slice(0, 5).forEach((s) => warn('  ' + s))
+      warn('原始数据仍在：' + userDataDirs[0])
+      warn('请关闭正在运行的程序后重试')
+      process.exit(1)
+    }
+    log(`已备份 userData（来自 ${path.basename(path.dirname(userDataDirs[0]))}）`)
   }
-  log(`已备份 userData（来自 ${path.basename(path.dirname(userDataDirs[0]))}）`)
 }
 
 // 2. 清空 release 下的旧打包产物
 //    必须保留 _userData_backup / _userData_tmp：
 //    后者是压缩失败后暂存用户数据的地方，删掉就等于丢数据
 fs.mkdirSync(releaseDir, { recursive: true })
-for (const name of fs.readdirSync(releaseDir)) {
-  if (KEEP_NAMES.has(name)) continue
-  const target = path.join(releaseDir, name)
-  try {
-    fs.rmSync(target, { recursive: true, force: true })
-  } catch (e) {
-    // 常见原因：程序还在运行导致文件被占用（EBUSY/EPERM）
-    warn(`无法删除 ${name}：${e.message}`)
-    warn('  若程序正在运行，请先关闭后再打包')
-    process.exit(1)
+const cleanupProblems = clearReleaseDir({ releaseDir, keepNames: KEEP_NAMES })
+if (cleanupProblems.length) {
+  warn('清理 release 目录失败（' + cleanupProblems.length + ' 项），已中止打包：')
+  cleanupProblems.slice(0, 5).forEach((p) => warn('  ' + p.name + '：' + p.message))
+  warn('  常见原因：程序仍在运行导致文件被占用（EBUSY/EPERM），请先关闭后再打包')
+  if (fs.existsSync(userDataBackup)) {
+    warn('  用户数据备份已保留、未删除：' + userDataBackup)
+    warn('  请勿删除该备份；确认数据后重新打包')
   }
+  const udTmpLeft = path.join(releaseDir, '_userData_tmp')
+  if (fs.existsSync(udTmpLeft)) {
+    warn('  压缩暂存目录也已保留、未删除：' + udTmpLeft)
+  }
+  process.exit(1)
 }
 
 // 3. 组装免安装目录：electron 运行时 + 我们的应用
@@ -222,7 +311,15 @@ fs.writeFileSync(path.join(appDir, 'package.json'), JSON.stringify({
 
 // 4. 放回用户数据
 if (fs.existsSync(userDataBackup)) {
-  copyDir(userDataBackup, path.join(stage, 'userData'))
+  const skipped = copyDir(userDataBackup, path.join(stage, 'userData'))
+  if (skipped.length) {
+    // 未完整复制就删备份等于丢数据：保留备份并中止，由用户决定如何处理
+    warn('放回 userData 时有 ' + skipped.length + ' 项未复制，已中止打包：')
+    skipped.slice(0, 5).forEach((s) => warn('  ' + s))
+    warn('备份仍保留、未删除：' + userDataBackup)
+    warn('请关闭正在运行的程序后重试，不要手动删除该备份')
+    process.exit(1)
+  }
   fs.rmSync(userDataBackup, { recursive: true, force: true })
   log('已放回 userData')
 }
@@ -369,3 +466,16 @@ log('完成（release/）：')
 log('  目录     ' + stage)
 log('  程序包   ' + appZip + '  (' + (fs.statSync(appZip).size / 1024 / 1024).toFixed(2) + ' MB)')
 log('  源码包由 GitHub Release 自动生成，无需上传')
+}
+
+if (require.main === module) {
+  main()
+}
+
+module.exports = {
+  isProductVersionDir,
+  planBackupRecovery,
+  clearReleaseDir,
+  dirHasContent,
+  KEEP_NAMES
+}

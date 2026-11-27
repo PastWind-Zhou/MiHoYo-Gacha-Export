@@ -37,7 +37,7 @@
   - 状态文案：`ui.update.status.<status>`，`${version}` / `${progress}` 占位符在渲染层替换（主进程 `I18N_DATA` 返回原始字典，不经过 `parseText`）；`backing-up` / `moving` 等连字符状态做别名映射；失败时拼接 `error`。
   - 更新说明 `notes` 以 `whitespace-pre-wrap` 展示。
 - `defineEmits` 增加 `checkUpdate` / `applyUpdate` / `skipUpdate`；`defineProps` 增加 `updateInfo` / `updateAction` / `updateBusy`（均带默认值，父组件未传时不报错）。
-- **版本与 Build 展示已存在于已提交基线**（`95fa58e`）：`Version: v{{version}} · Build: {{buildId}}`，`buildId` 来自 `GET_CONFIG` 的 `buildInfo.buildId`（主进程 `paths.js:getBuildInfo()` 读取 `resources/app/build-info.json`，由 `tools/package.js` 写入）。本次核实链路完整，未重复实现。
+- **版本与 Build 展示已存在于已提交基线**（`95fa58e`）：`Version: v{{version}} · Build: {{buildId}}`，`buildId` 来自 `GET_CONFIG` 的 `buildInfo.buildId`（主进程 `paths.js:getBuildInfo()` 读取 `resources/app/build-info.json`，由 `tools/package.js` 写入）。文档不写死具体构建号，实际值**以包内 `build-info.json` 为准**。本次核实链路完整，未重复实现。
 - 所有 IPC 调用补异常处理：`SAVE_CONFIG` / `DISABLE_PROXY` / `LANG_MAP` / `GET_CONFIG` 均 `try/catch/finally`；新增 `settingSaving`、`proxyLoading` 并在 `finally` 复位；`shell.openExternal` 补 `.catch()`；`deleteData()` 原有 `try/catch/finally` 保持不变。
 
 ### 1.3 `src/i18n/genshin/简体中文.json` / `English.json`

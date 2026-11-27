@@ -366,6 +366,16 @@ watch(() => state.tab, (tab) => {
   }
 })
 
+// 从其它游戏回到原神时，若仍停留在千星奇域标签，必须重新读取 UGC 数据。
+// 仅监听 tab 不够：game 也可能由 updateConfig/配置变更直接改写，此时 tab 不变，
+// 页面会一直显示旧游戏留下的空白或过期数据。changeGame 内的显式读取已移除，
+// 统一在这里处理，避免同一轮切换发起两次 IPC。
+watch(() => state.game, (game, oldGame) => {
+  if (game === 'genshin' && oldGame !== 'genshin' && state.tab === 'ugc') {
+    readUgcData()
+  }
+})
+
 const resetUgcState = () => {
   ugcSeq++
   state.ugcData = null
@@ -396,10 +406,8 @@ const changeGame = async (gameId) => {
   if (gameId !== 'genshin') {
     if (state.tab === 'ugc') state.tab = 'stats'
     resetUgcState()
-  } else if (state.tab === 'ugc') {
-    // 回到原神且停留在该标签页：立即读取
-    readUgcData()
   }
+  // 回到原神且停留在千星奇域标签时，由 state.game 的 watch 统一触发读取
   await getI18nData()
   await updateConfig()
   await loadWaiwai()

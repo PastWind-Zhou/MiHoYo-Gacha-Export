@@ -13,6 +13,12 @@ const { games, isValidGame, getGachaTypes, getGameInfo } = require('./games')
 const { getBuildInfo } = require('./paths')
 
 const dataMap = new Map()
+// dataMap 的 key 统一归一为字符串：旧版 JSON / config.json 里同一账号
+// 可能存成数字 123456，而抓取接口返回字符串 '123456'。Map 会把它们
+// 当作两个不同账号，抓取时 localData 取不到、合并时又被判成不同 uid，
+// 最终结果就是本地记录被整份丢弃。只在 dataMap 的 key 边界归一，
+// data.uid 保留原值供界面展示与旧文件兼容。
+const uidKey = (uid) => (uid === undefined || uid === null ? uid : String(uid))
 let cacheFolder = null
 
 const game = () => games[config.game]
@@ -144,13 +150,13 @@ const doReadData = async () => {
         if (!data.time || !Number.isFinite(Number(data.time))) {
           data.time = Date.now()
         }
-        dataMap.set(data.uid, data)
+        dataMap.set(uidKey(data.uid), data)
       }
     } catch (e) {
       sendMsg(e, 'ERROR')
     }
   }
-  if ((!config.current && dataMap.size) || (config.current && dataMap.size && !dataMap.has(config.current))) {
+  if ((!config.current && dataMap.size) || (config.current && dataMap.size && !dataMap.has(uidKey(config.current)))) {
     await changeCurrent(dataMap.keys().next().value)
   }
 }
@@ -183,7 +189,7 @@ const readIdle = async () => {
 }
 
 const deleteData = async (uid, action) => {
-  const data = dataMap.get(uid)
+  const data = dataMap.get(uidKey(uid))
   if (data) {
     data.deleted = action
     await saveData(data)
@@ -195,8 +201,12 @@ const changeCurrent = async (uid) => {
   // 否则会把别的游戏的 uid 写进 currents[game]，导致
   // dataMap.get(current) 取到错误游戏的记录。
   if (uid === undefined || uid === null || uid === '') return
-  if (!dataMap.has(uid)) return
-  config.setCurrent(uid)
+  const key = uidKey(uid)
+  if (!dataMap.has(key)) return
+  // 写入 config.current 的必须是归一后的 key：渲染层直接
+  // dataMap.get(state.current) 取当前账号，类型不一致会查不到。
+  // 用户可见 UID 来自 data.uid，保留原值，因此这里归一不改变展示。
+  config.setCurrent(key)
   await config.save()
 }
 
@@ -390,8 +400,8 @@ const getGachaLogs = async ({ name, key }, url) => {
       break
     }
 
-    if (!config.fetchFullHistory && logs.length && uid && dataMap.has(uid)) {
-      const result = dataMap.get(uid).result
+    if (!config.fetchFullHistory && logs.length && uid && dataMap.has(uidKey(uid))) {
+      const result = dataMap.get(uidKey(uid)).result
       if (result.has(key)) {
         const arr = result.get(key)
         if (arr.length) {
@@ -632,7 +642,8 @@ const fetchData = async (urlOverride) => {
   const apiBase = `${domain}${g.apiBase}`
   let queryString = searchParams.toString()
   const vUid = await tryGetUid(apiBase, queryString)
-  let localLang = dataMap.has(vUid) ? dataMap.get(vUid).lang : ''
+  const vUidKey = uidKey(vUid)
+  let localLang = dataMap.has(vUidKey) ? dataMap.get(vUidKey).lang : ''
   if (localLang) {
     if (g.langFix && !localLang.startsWith('zh-')) {
       localLang = localLang.replace(/-\w+$/, '')
@@ -676,7 +687,7 @@ const fetchData = async (urlOverride) => {
         throw new Error('unsupported server region')
       }
       if (localTimeZone === undefined) {
-        localTimeZone = dataMap.get(uid)?.region_time_zone
+        localTimeZone = dataMap.get(uidKey(uid))?.region_time_zone
         if (localTimeZone === undefined) {
           localTimeZone = tz
         }
@@ -687,7 +698,7 @@ const fetchData = async (urlOverride) => {
         })
       }
     } else if (localTimeZone === undefined) {
-      localTimeZone = dataMap.get(uid)?.region_time_zone
+      localTimeZone = dataMap.get(uidKey(uid))?.region_time_zone
       if (localTimeZone === undefined) {
         localTimeZone = region_time_zone
       }
@@ -719,10 +730,13 @@ const fetchData = async (urlOverride) => {
     sendMsg(`以下卡池获取失败，已保留本地原有数据：${failedPools.join('、')}`, 'ERROR')
   }
   const data = { result, time: Date.now(), uid: originUid, lang, region: originRegion, region_time_zone: localTimeZone, deleted: false }
-  const localData = dataMap.get(originUid)
+  // 取值/写回都走归一后的 key：本地文件可能是数字 uid、接口是字符串 uid，
+  // 直接按原值 get 会拿到 undefined，mergeData 便没有机会合并本地记录。
+  const localData = dataMap.get(uidKey(originUid))
   const mergedResult = mergeData(localData, data)
   data.result = mergedResult
-  dataMap.set(originUid, data)
+  // data.uid 保持接口原值（展示/落盘兼容），只有 Map 的 key 归一。
+  dataMap.set(uidKey(originUid), data)
   await changeCurrent(originUid)
   await saveData(data)
 }
