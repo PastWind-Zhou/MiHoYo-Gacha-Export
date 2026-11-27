@@ -228,5 +228,7 @@
   "ui.update.status.validating": "正在校验升级后的数据…",
   "ui.update.status.idle": "已是最新版本",
   "ui.update.status.failed": "更新失败",
-  "ui.update.status.skipped": "已跳过版本 ${version}"
+  "ui.update.status.skipped": "已跳过版本 ${version}",
+  "ui.update.status.restoring": "正在从备份恢复数据…",
+  "ui.update.status.done": "更新已完成"
 }

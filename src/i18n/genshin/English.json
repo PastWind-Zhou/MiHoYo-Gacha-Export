@@ -228,5 +228,7 @@
   "ui.update.status.validating": "Validating data after upgrade…",
   "ui.update.status.idle": "You are up to date",
   "ui.update.status.failed": "Update failed",
-  "ui.update.status.skipped": "Skipped version ${version}"
+  "ui.update.status.skipped": "Skipped version ${version}",
+  "ui.update.status.restoring": "Restoring data from backup…",
+  "ui.update.status.done": "Update completed"
 }
