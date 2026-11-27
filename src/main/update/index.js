@@ -293,12 +293,14 @@ const validateAfterUpgrade = async (state) => {
   if (!manifest || !Array.isArray(manifest.files)) {
     // 备份清单缺失：无法校验也无法恢复。数据本身大概率没问题，
     // 保守起见不回滚，但明确提示用户检查
-    sendMsg('更新完成，但备份清单缺失，已跳过数据校验', 'UPDATE_HINT')
+    sendMsg('更新完成，但备份清单缺失，已跳过数据校验', 'UPDATE_MESSAGE')
     await finishUpdate(state, null)
     return true
   }
   const result = verifyManifest(userDataPath, manifest, { volatile: ['log.txt'] })
   if (result.ok) {
+    // 只有真正「更新完成」才发 UPDATE_HINT（渲染层会据此显示「直接更新」）；
+    // 其它提示走 UPDATE_MESSAGE，避免误报完成状态
     sendMsg(`已更新到 v${state.toVersion}，用户数据校验通过`, 'UPDATE_HINT')
     await finishUpdate(state, null)
     return true
@@ -315,13 +317,13 @@ const validateAfterUpgrade = async (state) => {
     retry = { ok: false, missing: [], corrupt: [e.message] }
   }
   if (retry.ok) {
-    sendMsg(`更新后数据校验发现问题，已从备份恢复 ${restore.restored.length} 个文件`, 'UPDATE_HINT')
+    sendMsg(`更新后数据校验发现问题，已从备份恢复 ${restore.restored.length} 个文件`, 'UPDATE_MESSAGE')
     await finishUpdate(state, { recovered: restore.restored })
     return true
   }
   // 仍失败：回滚旧版本
   const detail = [...retry.missing, ...retry.corrupt].slice(0, 5).join(', ')
-  sendMsg(`新版本数据校验失败（${detail}），正在回滚旧版本…`, 'UPDATE_HINT')
+  sendMsg(`新版本数据校验失败（${detail}），正在回滚旧版本…`, 'UPDATE_MESSAGE')
   try {
     writeState(appRoot, Object.assign({}, state, { phase: 'rollback', reason: detail }))
     writeState(state.oldAppRoot, {
@@ -343,7 +345,7 @@ const validateAfterUpgrade = async (state) => {
     app.quit()
   } else {
     // 旧版本程序缺失无法回滚：保留新版本并给出手动恢复指引
-    sendMsg(`旧版本程序缺失，无法回滚；用户数据备份位于：${backupUserDataDir}`, 'UPDATE_HINT')
+    sendMsg(`旧版本程序缺失，无法回滚；用户数据备份位于：${backupUserDataDir}`, 'UPDATE_MESSAGE')
     sendStatus('failed', { message: '数据校验失败且无法回滚' })
   }
   return false
@@ -379,14 +381,14 @@ const initUpdate = async () => {
     if (localState && localState.phase === 'staged') {
       // 上次更新已暂存并尝试启动新版本，但现在运行的是旧目录：
       // relaunch 失败或用户手动启动。给出明确提示，不自动重试
-      sendMsg(`检测到未完成的更新（v${localState.toVersion || ''}），新版本目录：${localState.newAppRoot || ''}`, 'UPDATE_HINT')
+      sendMsg(`检测到未完成的更新（v${localState.toVersion || ''}），新版本目录：${localState.newAppRoot || ''}`, 'UPDATE_MESSAGE')
       clearState(appRoot)
       return
     }
     if (localState && localState.phase === 'failed') {
       // 上次更新失败：提示原因；本次会话不再自动检测，
       // 避免反复撞同一错误（手动触发不受影响）
-      sendMsg(`上次更新失败：${localState.message || '未知原因'}`, 'UPDATE_HINT')
+      sendMsg(`上次更新失败：${localState.message || '未知原因'}`, 'UPDATE_MESSAGE')
       clearState(appRoot)
       return
     }
@@ -423,17 +425,22 @@ ipcMain.handle('APPLY_UPDATE', async () => {
   return asRpcResult(await startUpdate())
 })
 
-// SKIP_UPDATE：入参 { version }，跳过指定版本；传空字符串清除标记（回滚后想重试）
-// 兼容旧渲染层的位置参数写法，避免两条分支发布不同步时互相打断
+// SKIP_UPDATE：入参 { version }（具名对象），跳过指定版本；空字符串清除标记
+// 返回 { ok: true } | { ok: false, error }
 ipcMain.handle('SKIP_UPDATE', async (event, params) => {
   await config.ready
   try {
-    const requested = params && typeof params === 'object' ? params.version : params
+    if (!params || typeof params !== 'object' || Array.isArray(params)) {
+      return { ok: false, error: '参数格式错误，期望 { version }' }
+    }
+    const requested = params.version
     // 空字符串是显式「清除跳过标记」，不能回退到 updateInfo.version
     if (requested === '') {
       config.set('skipVersion', '')
       await config.save()
-      return { ok: true, skipVersion: '' }
+      updateInfo.available = false
+      updateInfo.status = 'idle'
+      return { ok: true }
     }
     const v = parseVersion(requested) || updateInfo.version
     if (!v || !semver.valid(v)) {
@@ -441,7 +448,10 @@ ipcMain.handle('SKIP_UPDATE', async (event, params) => {
     }
     config.set('skipVersion', v)
     await config.save()
-    return { ok: true, skipVersion: v }
+    // 跳过即失效：否则 UI 本地已置 skipped，而主进程仍 available 会误触发布
+    updateInfo.available = false
+    updateInfo.status = 'idle'
+    return { ok: true }
   } catch (e) {
     return { ok: false, error: e.message }
   }
