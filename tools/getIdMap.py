@@ -1,6 +1,15 @@
+# 星穹铁道（hkrpg）物品 ID ↔ 名称字典生成脚本
+#
+# 产物写入 src/idJson/hkrpg.json —— 与 src/main/games.js 引用的路径一致
+#（历史上写到 src/idJson.json，该文件无人读取，属失效路径）。
+# 原神 / 绝区零的字典不来自本脚本，勿在此扩展。
+
 import requests
 import json
 from opencc import OpenCC
+
+# 请求超时：远端不可达时快速失败，而不是无限挂起
+REQUEST_TIMEOUT = 30
 
 # 初始化 OpenCC 转换器
 cc = OpenCC("s2t")
@@ -34,7 +43,7 @@ type_map = {
 
 
 def fetch_json(url):
-    response = requests.get(url)
+    response = requests.get(url, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
     return response.json()
 
@@ -78,7 +87,7 @@ def main():
             transformed_data[lang].update(weapon_transformed[lang])
             transformed_data[lang].update(character_transformed[lang])
 
-        with open("./src/idJson.json", "w", encoding="utf-8") as f:
+        with open("./src/idJson/hkrpg.json", "w", encoding="utf-8") as f:
             json.dump(transformed_data, f, ensure_ascii=False, indent=2)
 
     except requests.RequestException as e:

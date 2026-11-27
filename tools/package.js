@@ -10,6 +10,14 @@ const { spawnSync } = require('child_process')
 const root = path.resolve(__dirname, '..')
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 const productName = pkg.build.productName
+
+// 只认「本产品的版本目录」：目录名必须是 <productName>-<semver>[-后缀] 形式
+// （与 src/main/paths.js 的 isProductVersionDir 保持一致，改动时两处同步）。
+// 早期实现用 /gacha/i 宽松匹配仓库父目录，会把名字含 gacha 的无关目录的
+// userData 也当成「本机最新数据」回填进发布目录 —— 他人数据被静默混入。
+const isProductVersionDir = (name) =>
+  /^MiHoYoGachaExport-\d+\.\d+\.\d+(-[a-z]+)?$/.test(name)
+
 const version = pkg.version
 const releaseDir = path.join(root, 'release')
 // 免安装目录名与压缩包名保持一致（去掉 .zip 后缀）：
@@ -144,8 +152,10 @@ const findUserDataDirs = () => {
       if (!entry.isDirectory()) continue
       const name = entry.name
       if (name.startsWith('_') || name === 'icons') continue
-      // 仓库旁目录只认与本项目相关的命名，避免误取其它项目的数据
-      if (base === parentDir && !/gacha/i.test(name)) continue
+      // 仓库旁目录只认本产品的版本目录（严格匹配），避免误取其它项目的数据；
+      // build/ 与 release/ 下的目录（如 electron-builder 的 win-unpacked）
+      // 都是本产品自己的产物，维持原有宽松过滤即可
+      if (base === parentDir && !isProductVersionDir(name)) continue
       const p = path.join(base, name, 'userData')
       try {
         if (fs.existsSync(p) && fs.statSync(p).isDirectory()) dirs.push(p)
@@ -163,8 +173,13 @@ const userDataDirs = findUserDataDirs()
 if (userDataDirs.length) {
   const skipped = copyDir(userDataDirs[0], userDataBackup)
   if (skipped.length) {
-    warn('备份 userData 时有 ' + skipped.length + ' 项未复制：')
+    // 备份不完整就必须中止：后续步骤会清空 release/ 并删除原 release 目录，
+    // 一旦跳过的文件里有抽卡记录或 config，继续执行等于把用户数据永久删掉
+    warn('备份 userData 时有 ' + skipped.length + ' 项未复制，已中止打包：')
     skipped.slice(0, 5).forEach((s) => warn('  ' + s))
+    warn('原始数据仍在：' + userDataDirs[0])
+    warn('请关闭正在运行的程序后重试')
+    process.exit(1)
   }
   log(`已备份 userData（来自 ${path.basename(path.dirname(userDataDirs[0]))}）`)
 }

@@ -97,7 +97,9 @@ function startMain() {
             if (event.code === 'END') {
                 if (electronProcess && electronProcess.kill) {
                     manualRestart = true
-                    process.kill(electronProcess.pid)
+                    // 用子进程句柄 kill 而不是 process.kill(pid)：
+                    // Windows 下按 pid 杀进程可能留下残余子进程（Chromium 渲染进程树）
+                    electronProcess.kill()
                     electronProcess = null
                     startElectron()
 
