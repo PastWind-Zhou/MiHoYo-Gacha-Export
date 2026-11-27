@@ -15,6 +15,11 @@ const path = require('path')
 const fetch = require('electron-fetch').default
 const { games } = require('./games')
 const { userDataPath } = require('./paths')
+// 必须在顶层静态 require：
+// 函数体内的 require('./module/bannerSource') 无法被 rollup 静态分析，
+// 打包后原样残留在 main.js 里，而产物中并不存在该文件，
+// 运行到「立即同步」就会抛 "Cannot find module './module/bannerSource'"。
+const { fetchBanners } = require('./module/bannerSource')
 
 const BANNER_DIR = path.resolve(__dirname, '../gachaBanner')
 // 覆盖层放在 userData 下，随应用数据目录走（打包后路径由 utils 计算）
@@ -332,6 +337,13 @@ const markRemoteBanners = (set) => {
   return set
 }
 
+// 数据源技术标识 → 用户可见的中文名
+//
+// 提示语里不直接暴露 hoyo-gacha 这类仓库/站点标识，统一显示为「上游」；
+// 只有用户自己填写的自定义地址才原样显示（那是他自己填的，需要认得出）。
+// 注意：source 字段仍是技术标识，程序判断与失败详情依赖它，不要改。
+const sourceLabel = require('./module/bannerSource').sourceLabel
+
 // 检查并按需同步某游戏的卡池数据
 //
 // 流程（按需求）：
@@ -368,7 +380,7 @@ const syncBanners = async (game, options = {}) => {
       from = options.customUrl
       attempts.push({ source: from, ok: true })
     } else {
-      const r = await require('./module/bannerSource').fetchBanners(game)
+      const r = await fetchBanners(game)
       incoming = markRemoteBanners(normalizeSet(r.data, 'remote'))
       from = r.source
       attempts.push(...(r.attempts || []))
@@ -378,7 +390,7 @@ const syncBanners = async (game, options = {}) => {
     // 自定义地址失败时回退到默认源（hoyo-gacha → Biligame wiki）
     if (options.customUrl) {
       try {
-        const r = await require('./module/bannerSource').fetchBanners(game)
+        const r = await fetchBanners(game)
         incoming = markRemoteBanners(normalizeSet(r.data, 'remote'))
         from = r.source + '(fallback)'
         attempts.push(...(r.attempts || []))
@@ -389,7 +401,10 @@ const syncBanners = async (game, options = {}) => {
   }
 
   if (!incoming) {
-    const detail = attempts.map((a) => `${a.source}(${a.error || 'failed'})`).join('; ')
+    // 失败详情同样用「上游」代替技术标识，但保留具体错误信息（排查问题要用）
+    const detail = attempts
+      .map((a) => `${sourceLabel(a.source)}(${a.error || 'failed'})`)
+      .join('; ')
     return {
       game,
       action: 'failed',
@@ -407,7 +422,7 @@ const syncBanners = async (game, options = {}) => {
       game,
       action: 'unchanged',
       reason: 'same-as-upstream',
-      message: `本地卡池数据与 ${from} 完全一致（共 ${local.banners.length} 期），无需更新`,
+      message: `本地卡池数据与${sourceLabel(from)}完全一致（共 ${local.banners.length} 期），无需更新`,
       total: local.banners.length,
       maxEnd: decision.coverage ? decision.coverage.maxEndText : '',
       source: from

@@ -101,6 +101,20 @@ const fetchFromMihoyo = async (game) => {
 //   1. hoyo-gacha（GitHub Raw）—— 全量历史快照
 //   2. Biligame wiki —— 全量历史，解析 HTML
 //   3. 米游社官方 wiki —— 仅当期卡池（应急）
+// 内置源标识 → 用户可见的中文名
+//
+// 提示语里不暴露 hoyo-gacha 这类仓库/站点标识，统一显示为「上游」。
+// 多个源依次失败时用序号区分是第几个源挂了，保留排查所需的信息。
+// 注意：source 字段仍是技术标识，程序判断依赖它，不要改。
+const sourceLabel = (source, index = -1) => {
+  const name = String(source || '')
+  if (!name) return '上游'
+  // 自定义地址原样显示（那是用户自己填的，需要认得出）
+  if (/^https?:\/\//i.test(name)) return name
+  if (index >= 0) return `上游${index + 1}`
+  return '上游'
+}
+
 const fetchBanners = async (game) => {
   const attempts = []
   const chain = [
@@ -118,9 +132,11 @@ const fetchBanners = async (game) => {
     }
   }
   const err = new Error('所有卡池数据源均不可用：' +
-    attempts.map((a) => a.source + '(' + (a.error || 'failed') + ')').join('; '))
+    attempts
+      .map((a, i) => sourceLabel(a.source, i) + '(' + (a.error || 'failed') + ')')
+      .join('; '))
   err.attempts = attempts
   throw err
 }
 
-module.exports = { fetchBanners, fetchFromUpstream, fetchFromWiki, fetchFromMihoyo, UPSTREAM_SOURCES }
+module.exports = { fetchBanners, fetchFromUpstream, fetchFromWiki, fetchFromMihoyo, UPSTREAM_SOURCES, sourceLabel }

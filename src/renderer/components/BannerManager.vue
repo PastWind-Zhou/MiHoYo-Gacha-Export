@@ -41,13 +41,21 @@
            直接写 {{rows.length}} 会求值为 undefined.length 而抛错，
            导致整个 BannerManager 渲染中断、表格空白 -->
       <p class="text-sm text-gray-700 font-medium">{{text.table}} ({{filtered.length}}/{{state.rows.length}})</p>
-      <el-select v-model="state.channel" class="!w-36">
+      <!-- 类型筛选：
+           Element Plus 的 el-select 在「有选中值」时显示该值，
+           没有值时才显示 placeholder。
+           「全部」用空字符串作为 value，而空值恰好会被判定为「未选中」，
+           于是 placeholder 里的「全部」又冒不出来。
+           解决办法：placeholder 写死为「全部」的文案，
+           并让 v-model 为空时显示它（此时列表本身也是全部）。 -->
+      <el-select v-model="state.channel" :placeholder="text.all" class="!w-36">
         <el-option :label="text.all" value=""></el-option>
         <el-option v-for="item of channelOptions" :key="item.value" :label="item.label" :value="item.value"></el-option>
       </el-select>
       <el-input v-model="state.keyword" :placeholder="text.search" class="!w-56" clearable></el-input>
     </div>
-    <el-table :data="filtered" border stripe height="360" size="small">
+    <!-- 表格按版本倒序排列并分页，每页 10 条 -->
+    <el-table :data="pagedRows" border stripe size="small">
       <el-table-column prop="version" :label="text.version" width="70"></el-table-column>
       <el-table-column prop="phase" :label="text.phase" width="70"></el-table-column>
       <el-table-column :label="text.channel" width="90">
@@ -72,6 +80,15 @@
         </template>
       </el-table-column>
     </el-table>
+    <div v-if="filtered.length > pageSize" class="flex justify-end mt-2">
+      <el-pagination
+        v-model:current-page="state.page"
+        :page-size="pageSize"
+        :total="filtered.length"
+        layout="prev, pager, next"
+        small
+      ></el-pagination>
+    </div>
 
     <!-- 修正 UP -->
     <el-dialog v-model="state.editVisible" :title="text.editTitle" width="480px" append-to-body>
@@ -86,7 +103,11 @@
 </template>
 
 <script setup>
-import { reactive, computed, onMounted } from 'vue'
+import { reactive, computed, onMounted, watch } from 'vue'
+// 必须用 ESM import：Vite 只会静态打包 import，
+// 写成 require() 会原样残留在产物里，运行时找不到文件而抛错
+// （与之前 require('element-plus') 导致弹窗空白是同一类问题）
+import { sortByVersionDesc, paginate, getGameChannels, PAGE_SIZE } from '@renderer/bannerTable.cjs'
 
 const props = defineProps({
   i18n: Object,
@@ -99,7 +120,11 @@ const props = defineProps({
 const currentGame = computed(() => props.game || props.gameInfo?.game || '')
 
 const { ipcRenderer } = require('electron')
-const { ElMessage } = require('element-plus')
+// 不要在这里 require('element-plus')：
+// Vite 无法静态分析 CommonJS require，打包后会原样残留在产物里，
+// 运行时从「当前目录向上」找 node_modules —— 发布包里没有 node_modules，
+// 这行代码会抛错并中断整个组件的 setup，导致弹窗一片空白。
+// 本组件也没有实际用到 ElMessage，属于遗留死代码，直接移除。
 
 const text = computed(() => props.i18n?.ui?.banner || {})
 
@@ -111,8 +136,12 @@ const state = reactive({
   working: false,
   message: '',
   failed: false,
-  editVisible: false
+  editVisible: false,
+  page: 1
 })
+
+// 每页显示的条数
+const pageSize = PAGE_SIZE
 
 const sourceForm = reactive({
   url: '',
@@ -126,20 +155,29 @@ const sourceForm = reactive({
 const editForm = reactive({ up: '' })
 const editRow = reactive({ channel: '', start: '', end: '', version: '', phase: '', title: '', up4: [] })
 
+// 各游戏实际存在的卡池类型：
+//   原神   角色 / 武器 / 集录祈愿
+//   星铁   角色 / 光锥
+//   绝区零 角色 / 音擎
+// 下拉框只显示当前游戏有的类型，避免选出一个永远查不到数据的选项
 const channelOptions = computed(() => {
   const t = text.value
-  return [
-    { value: 'character', label: t.channelCharacter || 'character' },
-    { value: 'weapon', label: t.channelWeapon || 'weapon' },
-    { value: 'lightcone', label: t.channelLightcone || 'lightcone' },
-    { value: 'engine', label: t.channelEngine || 'engine' },
-    { value: 'jilu', label: t.channelJilu || 'jilu' }
-  ]
+  const labelKeys = {
+    character: 'channelCharacter',
+    weapon: 'channelWeapon',
+    lightcone: 'channelLightcone',
+    engine: 'channelEngine',
+    jilu: 'channelJilu'
+  }
+  return getGameChannels(currentGame.value).map((value) => ({
+    value,
+    label: t[labelKeys[value]] || value
+  }))
 })
 
 const filtered = computed(() => {
   const keyword = (state.keyword || '').trim().toLowerCase()
-  return state.rows.filter((row) => {
+  const list = state.rows.filter((row) => {
     if (state.channel && row.channel !== state.channel) return false
     if (!keyword) return true
     const haystack = [
@@ -148,6 +186,23 @@ const filtered = computed(() => {
     ].join(' ').toLowerCase()
     return haystack.includes(keyword)
   })
+  // 默认按版本倒序（最新版本在最前），同版本内按开始时间倒序
+  return sortByVersionDesc(list)
+})
+
+// 当前页显示的数据
+const pagedRows = computed(() => paginate(filtered.value, state.page, pageSize))
+
+// 数据变化后把页码收回有效范围
+// （同步后行数可能减少，页码越界会导致表格空白）
+watch(() => filtered.value.length, (total) => {
+  const maxPage = Math.max(1, Math.ceil(total / pageSize))
+  if (state.page > maxPage) state.page = maxPage
+})
+
+// 筛选条件变化后回到第一页，避免停留在超出范围的页码上
+watch([() => state.channel, () => state.keyword], () => {
+  state.page = 1
 })
 
 const channelName = (channel) => {
