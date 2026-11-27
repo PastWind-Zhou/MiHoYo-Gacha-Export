@@ -348,7 +348,7 @@ const assertNoRuntimeRequire = () => {
       // electron 与 Node 内建模块由运行时提供，无需打包
       if (target === 'electron' || target.startsWith('node:')) continue
       if (['fs', 'path', 'url', 'http', 'https', 'os', 'crypto', 'util', 'stream', 'zlib',
-        'buffer', 'events', 'net', 'tls', 'child_process', 'assert', 'constants',
+        'buffer', 'events', 'net', 'tls', 'dns', 'timers', 'child_process', 'assert', 'constants',
         'string_decoder', 'graceful-fs'].includes(target)) continue
       problems.push(`${path.basename(file)}: ${m}`)
     }
