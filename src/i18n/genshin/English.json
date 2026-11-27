@@ -230,5 +230,21 @@
   "ui.ugc.type2000": "UGC Wish II",
   "ui.ugc.poolUnknown": "Unknown pool",
   "ui.button.ugcRefresh": "Refresh",
-  "ui.button.ugcUpdate": "Fetch UGC Data"
+  "ui.button.ugcUpdate": "Fetch UGC Data",
+  "ui.setting.updateHint": "When enabled, new versions are checked at startup. You can also check or update manually here.",
+  "ui.setting.updateCheck": "Check for updates",
+  "ui.setting.updateApply": "Update now",
+  "ui.setting.updateSkip": "Skip this version",
+  "ui.update.status.init": "Update has not been checked yet",
+  "ui.update.status.checking": "Checking for updates…",
+  "ui.update.status.available": "New version ${version} available",
+  "ui.update.status.downloading": "Downloading update ${progress}",
+  "ui.update.status.verifying": "Verifying update package…",
+  "ui.update.status.backingUp": "Backing up user data…",
+  "ui.update.status.staging": "Preparing new version…",
+  "ui.update.status.ready": "New version ready, takes effect after restart",
+  "ui.update.status.validating": "Validating data after upgrade…",
+  "ui.update.status.idle": "You are up to date",
+  "ui.update.status.failed": "Update failed",
+  "ui.update.status.skipped": "Skipped version ${version}"
 }

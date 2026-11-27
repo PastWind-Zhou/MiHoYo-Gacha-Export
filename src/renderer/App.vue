@@ -72,7 +72,7 @@
         <ugc-panel :data="state.ugcData" :status="state.ugcStatus" :log="state.ugcLog" :i18n="state.i18n" @refresh="readUgcData()" @fetch="fetchUgcData()"></ugc-panel>
       </el-tab-pane>
     </el-tabs>
-    <Setting v-show="state.showSetting" :i18n="state.i18n" :gacha-data-info="dataInfo" :game-info="state.gameInfo" @refreshData="readData()" @changeLang="getI18nData()" @close="showSetting(false)"></Setting>
+    <Setting v-show="state.showSetting" :i18n="state.i18n" :gacha-data-info="dataInfo" :game-info="state.gameInfo" :update-info="state.updateInfo" :update-action="state.updateAction" :update-busy="updateBusy" @refreshData="readData()" @changeLang="getI18nData()" @close="showSetting(false)" @checkUpdate="checkUpdate()" @applyUpdate="applyUpdate()" @skipUpdate="skipUpdate()"></Setting>
 
     <el-dialog :title="ui.urlDialog.title" v-model="state.showUrlDlg" width="90%" class="max-w-md">
       <p class="mb-4 text-gray-500">{{ui.urlDialog.hint}}</p>
@@ -132,7 +132,11 @@ const state = reactive({
   // 千星奇域（hk4e_ugc）独立数据：不进入 dataMap，不参与常规统计
   ugcData: null,
   ugcStatus: 'init',
-  ugcLog: ''
+  ugcLog: '',
+  // 自动更新状态（主进程 GET_UPDATE_INFO / UPDATE_STATUS 推送，经 normalizeUpdateInfo 归一化）
+  updateInfo: { status: 'init', available: false, version: '', notes: '', progress: null, error: '' },
+  // 正在进行的更新操作：'' | 'check' | 'apply' | 'skip'（用于设置页按钮 loading）
+  updateAction: ''
 })
 
 const gameOptions = computed(() => {
@@ -464,7 +468,11 @@ const exportUIGFJSON = () => {
     cancelButtonText: state.i18n.ui.common.cancel,
     beforeClose: (action, instance, done) => {
       if (action === 'confirm') {
-        ipcRenderer.invoke('EXPORT_UIGF_JSON', Array.from(selected));
+        // IPC 失败不能让确认弹窗永远停在安装中状态
+        ipcRenderer.invoke('EXPORT_UIGF_JSON', Array.from(selected)).catch((e) => {
+          console.error('export uigf failed', e)
+          ElMessage.error(e?.message || String(e))
+        })
       }
       done();
     }
@@ -475,8 +483,10 @@ const exportUIGFJSON = () => {
 
 const importData = async () => {
   state.status = 'loading'
+  const seq = ++loadSeq
   try {
     const data = await ipcRenderer.invoke('IMPORT_UIGF_JSON')
+    if (seq !== loadSeq) return
     if (data) {
       applyData(data)
       state.status = 'loaded'
@@ -489,6 +499,7 @@ const importData = async () => {
       await readUgcData()
     }
   } catch (e) {
+    if (seq !== loadSeq) return
     state.status = 'failed'
     state.log = e?.message || String(e)
   }
@@ -593,6 +604,108 @@ const updateConfig = async () => {
   }
 }
 
+// ---- 自动更新（渲染层只负责触发与展示，检测/下载/切换都在主进程完成）----
+
+// 主进程推送的更新状态结构不可控（handler 未实现/抛错/旧版本），
+// 统一在这里归一化，避免渲染层各处重复做类型防御
+const normalizeUpdateInfo = (raw) => {
+  const info = raw && typeof raw === 'object' ? raw : {}
+  const progress = typeof info.progress === 'number' && Number.isFinite(info.progress)
+    ? Math.min(100, Math.max(0, Math.round(info.progress)))
+    : null
+  const status = typeof info.status === 'string' && info.status ? info.status : 'init'
+  return {
+    status,
+    // 主进程回推的 UPDATE_STATUS 可能只带 status 不带 available，
+    // 这里按状态推断一次，避免「立即更新」按钮一直不可用
+    available: !!info.available || status === 'available',
+    version: info.version == null ? '' : String(info.version),
+    notes: info.notes == null ? '' : String(info.notes),
+    progress,
+    error: info.error == null ? '' : String(info.error)
+  }
+}
+
+// 更新流程中主进程正在忙的状态：此时不允许再次触发检查/更新/跳过
+const updateBusyStatus = ['checking', 'downloading', 'verifying', 'backing-up', 'backingUp', 'staging', 'moving', 'validating', 'ready']
+const updateBusy = computed(() => updateBusyStatus.includes(state.updateInfo.status))
+
+// 启动时同步一次主进程的更新状态（如启动检测已发现新版本）
+const initUpdateInfo = async () => {
+  try {
+    const info = await ipcRenderer.invoke('GET_UPDATE_INFO')
+    state.updateInfo = normalizeUpdateInfo(info)
+  } catch (e) {
+    // 主进程尚未注册该 IPC（旧版本/未合并 update 模块）时保持默认值，不影响其它功能
+  }
+}
+
+const setUpdateResult = (result, fallbackInfo) => {
+  // 契约：{ ok: true, data } | { ok: false, error }
+  if (result && result.ok) {
+    if (result.data) {
+      state.updateInfo = normalizeUpdateInfo(result.data)
+    }
+  } else {
+    state.updateInfo = normalizeUpdateInfo({
+      ...fallbackInfo,
+      status: 'failed',
+      error: result && result.error
+    })
+  }
+}
+
+const checkUpdate = async () => {
+  if (state.updateAction || updateBusy.value) return
+  state.updateAction = 'check'
+  try {
+    const result = await ipcRenderer.invoke('CHECK_UPDATE')
+    setUpdateResult(result, {})
+  } catch (e) {
+    // IPC 异常（handler 未注册/抛错）不能让按钮永久 loading
+    state.updateInfo = normalizeUpdateInfo({ status: 'failed', error: e?.message || String(e) })
+  } finally {
+    state.updateAction = ''
+  }
+}
+
+const applyUpdate = async () => {
+  if (state.updateAction || updateBusy.value || !state.updateInfo.available) return
+  state.updateAction = 'apply'
+  const fallbackInfo = {
+    available: true,
+    version: state.updateInfo.version
+  }
+  try {
+    const result = await ipcRenderer.invoke('APPLY_UPDATE')
+    // 下载/备份/暂存的后续进度由主进程通过 UPDATE_STATUS 推送
+    setUpdateResult(result, fallbackInfo)
+  } catch (e) {
+    state.updateInfo = normalizeUpdateInfo({ ...fallbackInfo, status: 'failed', error: e?.message || String(e) })
+  } finally {
+    state.updateAction = ''
+  }
+}
+
+const skipUpdate = async () => {
+  if (state.updateAction || updateBusy.value || !state.updateInfo.available) return
+  state.updateAction = 'skip'
+  try {
+    const result = await ipcRenderer.invoke('SKIP_UPDATE', { version: state.updateInfo.version })
+    if (result && result.ok) {
+      // 主进程记录跳过版本；渲染层本地收敛为「已跳过」，
+      // 避免主进程不回推状态时界面仍显示「发现新版本」
+      state.updateInfo = normalizeUpdateInfo({ ...state.updateInfo, status: 'skipped', available: false })
+    } else {
+      state.updateInfo = normalizeUpdateInfo({ ...state.updateInfo, status: 'failed', error: result && result.error })
+    }
+  } catch (e) {
+    state.updateInfo = normalizeUpdateInfo({ ...state.updateInfo, status: 'failed', error: e?.message || String(e) })
+  } finally {
+    state.updateAction = ''
+  }
+}
+
 const copyUrl = async () => {
   try {
     const successed = await ipcRenderer.invoke('COPY_URL')
@@ -621,6 +734,9 @@ const copyApiUrl = async () => {
   }
 }
 
+// 最近一条 UPDATE_HINT 消息：用于启动期事件早于数据加载完成时的补偿展示
+let updateHintMessage = null
+
 // IPC 监听器引用：组件卸载时必须移除，否则会累积并操作已销毁的组件状态
 const ipcHandlers = {
   LOAD_DATA_STATUS: (event, message) => {
@@ -628,11 +744,22 @@ const ipcHandlers = {
   },
   ERROR: (event, err) => {
     console.error(err)
-    ipcRenderer.invoke('LOG_ERROR', err && err.stack ? err.stack : String(err))
+    ipcRenderer.invoke('LOG_ERROR', err && err.stack ? err.stack : String(err)).catch(() => {})
   },
+  // 主进程更新相关的用户提示（如「更新已完成，重启工具后生效」）：
+  // 展示消息并进入 updated 状态，让顶部的「直接更新」重启按钮出现
   UPDATE_HINT: (event, message) => {
+    // 启动阶段该事件可能先于数据加载完成到达（监听器已提前注册），
+    // onMounted 末尾会补一次展示，避免被 readData 的结果覆盖
+    updateHintMessage = message
     state.log = message
     state.status = 'updated'
+  },
+  // 主进程在检测/下载/备份/暂存/校验各阶段推送的更新状态对象
+  UPDATE_STATUS: (event, message) => {
+    state.updateInfo = normalizeUpdateInfo(message)
+    // 新状态到达后复位按钮 loading，由状态本身决定后续可操作性
+    state.updateAction = ''
   },
   AUTHKEY_TIMEOUT: (event, message) => {
     state.authkeyTimeout = message
@@ -642,7 +769,7 @@ const ipcHandlers = {
 onMounted(async () => {
   // IPC 监听器必须先于任何 await 注册：
   // 主进程可能在首个 await（updateConfig/readData）期间就发出
-  // LOAD_DATA_STATUS / ERROR，晚注册会丢失启动期进度与错误事件
+  // LOAD_DATA_STATUS / ERROR / UPDATE_STATUS，晚注册会丢失启动期进度与错误事件
   for (const [channel, handler] of Object.entries(ipcHandlers)) {
     ipcRenderer.on(channel, handler)
   }
@@ -650,6 +777,15 @@ onMounted(async () => {
   await updateConfig()
   await readData()
   await getI18nData()
+
+  // 同步一次主进程的更新状态；主进程未注册该 IPC 时静默跳过
+  initUpdateInfo()
+
+  // 启动期间收到过 UPDATE_HINT 时补展示（readData 可能已把 status 覆盖为 loaded）
+  if (updateHintMessage !== null && state.status !== 'loading') {
+    state.log = updateHintMessage
+    state.status = 'updated'
+  }
 
   // 按设置中的间隔自动同步卡池数据（失败不影响其它功能）
   ipcRenderer.invoke('MAYBE_SYNC_BANNERS', state.game).catch(() => {})
