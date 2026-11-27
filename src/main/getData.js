@@ -10,6 +10,7 @@ const { enableProxy, disableProxy } = require('./module/system-proxy')
 const mitmproxy = require('./module/node-mitmproxy')
 const { mergeData } = require('./utils/mergeData')
 const { games, isValidGame, getGachaTypes, getGameInfo } = require('./games')
+const { getBuildInfo } = require('./paths')
 
 const dataMap = new Map()
 let apiDomain = ''
@@ -694,7 +695,8 @@ ipcMain.handle('GET_CONFIG', async () => {
   await config.ready
   return Object.assign({}, config.value(), {
     current: config.current,
-    gameInfo: getGameInfo(config.game, config.lang)
+    gameInfo: getGameInfo(config.game, config.lang),
+    buildInfo: getBuildInfo()
   })
 })
 

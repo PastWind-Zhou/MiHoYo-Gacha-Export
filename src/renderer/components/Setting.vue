@@ -71,6 +71,9 @@
     </el-form>
     <h3 class="text-lg my-4">{{about.title}}</h3>
     <p class="text-gray-600 text-xs mt-1">{{text.idVersion}} {{gameInfo?.idVersion || '-'}}</p>
+    <!-- 版本与构建标识：版本号不变时（如覆盖重发同一版本），
+         用户靠构建时间就能分辨手上是新包还是旧包 -->
+    <p class="text-gray-600 text-xs mt-1">Version: v{{version}}<span v-if="buildId"> · Build: {{buildId}}</span></p>
     <p class="text-gray-600 text-xs mt-1">{{about.license}}</p>
     <p class="text-gray-600 text-xs mt-1">GitHub:
       <a @click="openLink('https://github.com/PastWind-Zhou/MiHoYo-Gacha-Export')" class="cursor-pointer text-blue-400">MiHoYo-Gacha-Export</a>
@@ -111,10 +114,15 @@
 
 <script setup>
 const { ipcRenderer, shell } = require('electron')
-import { reactive, onMounted, computed } from 'vue'
+import { reactive, onMounted, computed, ref } from 'vue'
 import BannerManager from './BannerManager.vue'
+import { version } from '../../../package.json'
 
 const emit = defineEmits(['close', 'changeLang', 'refreshData'])
+
+// 构建标识：来自主进程的 build-info.json（打包时由 tools/package.js 写入）。
+// 版本号不变时（如覆盖重发同一版本），用户靠它分辨新旧包
+const buildId = ref('')
 
 const props = defineProps({
   i18n: Object,
@@ -197,6 +205,8 @@ onMounted(async () => {
   data.langMap = await ipcRenderer.invoke('LANG_MAP')
   const config = await ipcRenderer.invoke('GET_CONFIG')
   Object.assign(settingForm, config)
+  // 构建标识：主进程从 resources/app/build-info.json 读取
+  buildId.value = (config && config.buildInfo && config.buildInfo.buildId) || ''
 })
 
 </script>

@@ -78,6 +78,20 @@ const latestMtime = (dir) => {
 }
 
 // 在候选根目录下查找版本目录中的 userData
+//
+// 只认「本产品的旧版本目录」：目录名必须以产品名开头，
+// 例如 MiHoYoGachaExport-1.0.1 / MiHoYoGachaExport-1.0.1-win。
+// 早期实现用 /gacha/i 匹配同级任意目录，会把无关目录的 userData
+// 也吸进来 —— 用户解压新包后莫名其妙冒出「别人的」抽卡记录就是这个原因。
+const PRODUCT_NAME = 'MiHoYoGachaExport'
+
+const isProductVersionDir = (name) => {
+  if (!name) return false
+  if (!name.startsWith(PRODUCT_NAME)) return false
+  // 后面必须是版本号（1.0.1 / 1.0.1-win / 1.0.1-source）
+  return /^MiHoYoGachaExport-\d+\.\d+\.\d+(-[a-z]+)?$/.test(name)
+}
+
 const findUserDataIn = (root, nameFilter) => {
   let entries = []
   try {
@@ -97,32 +111,46 @@ const findUserDataIn = (root, nameFilter) => {
 
 // 启动时迁移旧版本目录里的 userData（仅打包版需要）
 const migrateUserData = () => {
-  if (isDev) return false
+  if (isDev) return null
   try {
     // 当前目录已有数据 → 不做任何迁移
-    if (hasUserDataContent(userDataPath)) return false
+    if (hasUserDataContent(userDataPath)) return null
 
     const parent = path.dirname(appRoot)
     const candidates = [
-      ...findUserDataIn(appRoot, () => true),
-      // 同级目录：升级解压到新目录时，旧版本目录与新目录同级
-      ...findUserDataIn(parent, (name) => /gacha/i.test(name))
+      // 同级目录：升级解压到新目录时，旧版本目录与新目录同级。
+      // 只认产品自己的版本目录，避免吸收无关目录的数据
+      ...findUserDataIn(parent, isProductVersionDir)
     ]
-    if (!candidates.length) return false
+    if (!candidates.length) return null
 
     let best = null
     for (const dir of candidates) {
       const mtime = latestMtime(dir)
       if (!best || mtime > best.mtime) best = { dir, mtime }
     }
-    if (!best) return false
+    if (!best) return null
 
     fs.copySync(best.dir, userDataPath, { overwrite: false, errorOnExist: false })
-    return true
+    // 返回迁移来源，便于在日志中告知用户「数据是从哪来的」
+    return { from: best.dir, to: userDataPath }
   } catch (e) {
     // 迁移失败不能阻断启动
-    return false
+    return null
   }
 }
 
-module.exports = { isDev, appRoot, userDataPath, migrateUserData }
+// 构建标识：打包时由 tools/package.js 写入 resources/app/build-info.json
+// 版本号不变时（如 1.0.1 覆盖重发），用户靠 buildId 就能分辨新旧包
+const getBuildInfo = () => {
+  try {
+    const p = path.resolve(appRoot, 'resources', 'app', 'build-info.json')
+    const data = JSON.parse(fs.readFileSync(p, 'utf8'))
+    return { buildId: data.buildId || '', builtAt: data.builtAt || '' }
+  } catch (e) {
+    return { buildId: '', builtAt: '' }
+  }
+}
+
+module.exports = { isDev, appRoot, userDataPath, migrateUserData, isProductVersionDir, getBuildInfo }
+

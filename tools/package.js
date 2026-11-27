@@ -1,23 +1,25 @@
 // 正式打包脚本：输出统一放在仓库根目录的 release/ 内
-//   release/<productName>-<version>/                 免安装目录（含本地 userData）
-//   release/<productName>-<version>-win.zip          程序压缩包（不含 userData）
-//   release/<productName>-<version>-source.zip       源码压缩包（git 已提交内容，不含 userData/构建产物/docs）
+//   release/<productName>-<version>-win/     免安装目录（含本地 userData）
+//   release/<productName>-<version>-win.zip  程序压缩包（不含 userData）
+// 源码包由 GitHub Release 自动生成（Source code zip/tar.gz），这里不再重复产出。
 // 用法：node tools/package.js
 const fs = require('fs')
 const path = require('path')
-const { spawnSync, execFileSync } = require('child_process')
+const { spawnSync } = require('child_process')
 
 const root = path.resolve(__dirname, '..')
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 const productName = pkg.build.productName
 const version = pkg.version
 const releaseDir = path.join(root, 'release')
-const stage = path.join(releaseDir, `${productName}-${version}`)
+// 免安装目录名与压缩包名保持一致（去掉 .zip 后缀）：
+//   release/MiHoYoGachaExport-1.0.1-win/     ← 本地可直接运行
+//   release/MiHoYoGachaExport-1.0.1-win.zip  ← 解压后得到同名文件夹
+const stage = path.join(releaseDir, `${productName}-${version}-win`)
 const appZip = path.join(releaseDir, `${productName}-${version}-win.zip`)
-const sourceZip = path.join(releaseDir, `${productName}-${version}-source.zip`)
 // 需要保留的目录：备份与临时目录在打包过程中不能被清理掉，
 // 否则压缩中断会让用户数据在下一次打包时被永久删除
-const KEEP_NAMES = new Set(['_userData_backup', '_userData_tmp', '_source_stage'])
+const KEEP_NAMES = new Set(['_userData_backup', '_userData_tmp'])
 // Electron 运行时位置：
 //   1. 项目内 node_modules/electron/dist（正常安装依赖的情况）
 //   2. 环境变量 ELECTRON_DIST 指定
@@ -210,6 +212,21 @@ if (fs.existsSync(userDataBackup)) {
   log('已放回 userData')
 }
 
+// 4.5 写入构建标识
+//     版本号不变时（如 1.0.1 覆盖重发），用户无法分辨新旧包。
+//     记录构建时间并在窗口标题显示，用户一眼就能确认手上的是哪个包。
+const buildInfo = {
+  version,
+  builtAt: new Date().toISOString(),
+  buildId: `${version}-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}`
+}
+fs.writeFileSync(
+  path.join(stage, 'resources', 'app', 'build-info.json'),
+  JSON.stringify(buildInfo, null, 2),
+  'utf8'
+)
+log(`构建标识：${buildInfo.buildId}`)
+
 // 5. 压缩程序包（临时移出 userData，确保 zip 内不含真实记录）
 //    关键：压缩过程必须用 try/finally 保证 userData 一定被放回，
 //    且 _userData_tmp 不在清理名单里，避免中断后数据被永久删除。
@@ -239,7 +256,9 @@ const zipWithRetry = (source, dest, keepRoot = false) => {
 
 log('压缩程序包（Windows 原生 ZipFile）…')
 try {
-  zipWithRetry(stage, appZip)
+  // keepRoot=true：压缩目录本身，zip 内含顶层文件夹 MiHoYoGachaExport-1.0.1-win/
+  // 解压后得到一个同名文件夹，而不是一堆文件散在根目录
+  zipWithRetry(stage, appZip, true)
 } catch (e) {
   // 压缩失败也必须把 userData 放回去
   warn(e.message)
@@ -256,57 +275,82 @@ try {
   }
 }
 
-// 6. 源码包：取 git 已提交的内容（与 GitHub Release 的 Source code 一致）
-//    带顶层目录 <productName>-<version>/
-//    用 git 读取已提交版本，而不是工作区文件：
-//    否则未提交的改动会混进源码包，新增但未 add 的文件又会被漏掉。
-log('生成源码包…')
-const sourceStage = path.join(releaseDir, '_source_stage')
-const sourceRoot = path.join(sourceStage, `${productName}-${version}`)
-fs.rmSync(sourceStage, { recursive: true, force: true })
-fs.mkdirSync(sourceRoot, { recursive: true })
+// 6. 源码包不再单独产出：GitHub 会随 Release 自动提供 Source code (zip/tar.gz)。
+//    打包脚本只负责程序包，避免重复上传、也避免本地源码包与自动生成的源码包不一致。
 
-const git = (...args) => execFileSync('git', args, { cwd: root })
-
-// 打包前提示工作区是否有未提交改动（不阻断，但要让人知道）
-try {
-  const status = git('status', '--porcelain').toString('utf8').trim()
-  if (status) {
-    warn('工作区存在未提交改动，源码包将取「已提交版本」内容：')
-    status.split('\n').slice(0, 10).forEach((line) => warn('  ' + line))
-  }
-} catch (e) {
-  // git 状态读取失败不影响打包
-}
-
-let tracked
-try {
-  tracked = git('ls-files', '-z').toString('utf8').split('\0').filter(Boolean)
-} catch (e) {
-  warn('无法读取 git 跟踪文件列表：' + (e.stderr || e.message))
-  process.exit(1)
-}
-let missing = 0
-for (const rel of tracked) {
-  const to = path.join(sourceRoot, rel)
+// 7. 校验：压缩包内绝不能出现用户数据
+//    userData 里是真实抽卡记录（UID、卡池、时间），一旦打进发布包
+//    就会随 Release 分发给所有人。打包流程里虽然已把 userData 临时移出，
+//    但这里再独立校验一次，防止将来改动流程时静默泄露。
+const assertNoUserData = (zipPath) => {
+  let entries = []
   try {
-    // 从 git 对象库读已提交内容（二进制安全）
-    const content = execFileSync('git', ['show', `HEAD:${rel}`], { cwd: root, maxBuffer: 64 * 1024 * 1024 })
-    fs.mkdirSync(path.dirname(to), { recursive: true })
-    fs.writeFileSync(to, content)
+    const { execFileSync: exec } = require('child_process')
+    // 用 PowerShell 列出 zip 条目，避免引入额外依赖
+    const ps = `Add-Type -AssemblyName System.IO.Compression.FileSystem; ` +
+      `[System.IO.Compression.ZipFile]::OpenRead("${zipPath}").Entries | ForEach-Object { $_.FullName }`
+    const out = exec('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8' })
+    entries = String(out).split(/\r?\n/).filter(Boolean)
   } catch (e) {
-    // 文件在 HEAD 中不存在（新增未提交）→ 跳过并计数
-    missing++
+    warn('无法校验压缩包内容（跳过）：' + (e.message || e))
+    return
   }
+  const leaked = entries.filter((name) => /(^|\/)userData(\/|$)/i.test(name))
+  if (leaked.length) {
+    throw new Error(
+      `压缩包 ${path.basename(zipPath)} 内含用户数据条目 ${leaked.length} 个，已中止打包：\n  ` +
+      leaked.slice(0, 5).join('\n  ')
+    )
+  }
+  log(`  校验通过：${path.basename(zipPath)} 内无 userData（${entries.length} 个条目）`)
 }
-if (missing) {
-  log(`有 ${missing} 个文件尚未提交，未包含在源码包中`)
-}
-zipWithRetry(sourceRoot, sourceZip, true)
-fs.rmSync(sourceStage, { recursive: true, force: true })
 
-// 7. 完成
+assertNoUserData(appZip)
+
+// 8. 校验：产物里不能残留运行时 require
+//    Vite/rollup 只静态打包 import 与顶层 require；
+//    写在函数体里的 require(...) 会被原样留在产物中，
+//    运行时按 Node 规则去磁盘上找文件 —— 发布包里没有 node_modules，
+//    于是在用户点击相关功能时才抛 "Cannot find module ..."。
+//    已踩过的坑：require('element-plus')（卡池弹窗空白）、
+//    require('./module/bannerSource')（立即同步报错）。
+//    这里独立校验一次，防止将来再引入同类问题。
+const assertNoRuntimeRequire = () => {
+  const files = [
+    path.join(appDist, 'main', 'main.js'),
+    ...fs.readdirSync(path.join(appDist, 'renderer', 'assets'))
+      .filter((f) => f.endsWith('.js'))
+      .map((f) => path.join(appDist, 'renderer', 'assets', f))
+  ]
+  const problems = []
+  for (const file of files) {
+    if (!fs.existsSync(file)) continue
+    const code = fs.readFileSync(file, 'utf8')
+    // 匹配 require("xxx") / require('xxx')
+    const matches = code.match(/require\(\s*["']([^"']+)["']\s*\)/g) || []
+    for (const m of matches) {
+      const target = (m.match(/["']([^"']+)["']/) || [])[1] || ''
+      // electron 与 Node 内建模块由运行时提供，无需打包
+      if (target === 'electron' || target.startsWith('node:')) continue
+      if (['fs', 'path', 'url', 'http', 'https', 'os', 'crypto', 'util', 'stream', 'zlib',
+        'buffer', 'events', 'net', 'tls', 'child_process', 'assert', 'constants',
+        'string_decoder', 'graceful-fs'].includes(target)) continue
+      problems.push(`${path.basename(file)}: ${m}`)
+    }
+  }
+  if (problems.length) {
+    throw new Error(
+      `产物中残留 ${problems.length} 处运行时 require（运行时会报 Cannot find module），已中止打包：\n  ` +
+      problems.slice(0, 8).join('\n  ')
+    )
+  }
+  log('  校验通过：产物中无运行时 require 残留')
+}
+
+assertNoRuntimeRequire()
+
+// 9. 完成
 log('完成（release/）：')
 log('  目录     ' + stage)
 log('  程序包   ' + appZip + '  (' + (fs.statSync(appZip).size / 1024 / 1024).toFixed(2) + ' MB)')
-log('  源码包   ' + sourceZip + '  (' + (fs.statSync(sourceZip).size / 1024 / 1024).toFixed(2) + ' MB)')
+log('  源码包由 GitHub Release 自动生成，无需上传')

@@ -13,7 +13,8 @@ const { isDev, appRoot, userDataPath, migrateUserData } = require('./paths')
 const userPath = app.getPath('userData')
 
 // 打包版升级到新目录时，把旧版本目录里的抽卡记录迁移过来（只在当前目录无数据时执行）
-migrateUserData()
+// 迁移来源会记入日志，让用户能看清「数据是从哪个目录带过来的」
+const migrated = migrateUserData()
 
 let win = null
 const initWindow = () => {
@@ -41,6 +42,22 @@ const initWindow = () => {
 const getWin = () => win
 
 const log = []
+// 启动时的用户数据迁移记录：写入日志数组首条，
+// 这样用户在自己的 userData/log.txt 里能看到数据来源
+if (migrated && migrated.from) {
+  log.push([Date.now(), 'INFO', `已从旧版本目录迁移用户数据：${migrated.from}`])
+  // 立即落盘：迁移只发生在启动这一次，之后若没有其它日志，
+  // 这条记录就不会写进 log.txt，用户也就看不到数据来源
+  try {
+    fs.outputFileSync(
+      path.join(userDataPath, 'log.txt'),
+      `[INFO][${new Date().toLocaleString()}]已从旧版本目录迁移用户数据：${migrated.from}\r\n`,
+      'utf8'
+    )
+  } catch (e) {
+    // 日志写入失败不能阻断启动
+  }
+}
 const sendMsg = (text, type = 'LOAD_DATA_STATUS') => {
   if (win) {
     win.webContents.send(type, text)
