@@ -12,6 +12,7 @@
 //   4. 若本地完全没有卡池信息 → 全量拉取
 const fs = require('fs-extra')
 const path = require('path')
+const dns = require('dns').promises
 const fetch = require('electron-fetch').default
 const { games } = require('./games')
 const { userDataPath } = require('./paths')
@@ -37,6 +38,19 @@ const builtinBanners = {
 const genshinJilu = require('../gachaBanner/genshin-jilu.json')
 
 const MAX_REMOTE_BYTES = 8 * 1024 * 1024 // 远程响应最大 8MB
+
+// 自定义远程源 SSRF 防护：拒绝回环/内网/链路本地地址。
+// 只校验首跳不够，electron-fetch 默认跟随 302，外部 URL 可跳到 169.254.169.254
+const isBlockedHost = (host) => {
+  const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '')
+  if (h === 'localhost' || h === '0.0.0.0' || h === '::1') return true
+  if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h)) return true
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true
+  // 十进制/十六进制写法的回环地址（2130706433 = 127.0.0.1）
+  if (/^\d+$/.test(h) && Number(h) >= 2130706432 && Number(h) <= 2147483647) return true
+  if (/^0x[0-9a-f]+$/i.test(h)) return true
+  return false
+}
 
 const readJSONSafe = async (p) => {
   try {
@@ -252,6 +266,17 @@ const fetchRemoteJSON = async (url, options = {}) => {
   if (!/^https?:\/\//i.test(String(url || ''))) {
     throw new Error('invalid url protocol')
   }
+  let parsed
+  try {
+    parsed = new URL(url)
+  } catch (e) {
+    throw new Error('invalid url')
+  }
+  if (isBlockedHost(parsed.hostname)) throw new Error('blocked host')
+  // 域名可能解析到内网/回环（DNS rebinding 的最小防护）：逐条校验解析结果
+  const addresses = await dns.lookup(parsed.hostname, { all: true }).catch(() => [])
+  if (addresses.some(a => isBlockedHost(a.address))) throw new Error('blocked host')
+
   const timeout = Math.max(1, Number(options.timeout) || 30) * 1000
   const retry = Math.max(0, Number(options.retry) || 0)
   let lastError = null
@@ -259,29 +284,40 @@ const fetchRemoteJSON = async (url, options = {}) => {
     try {
       const res = await fetch(url, {
         method: 'GET',
+        // 不自动跟随跳转：逐跳校验，防止外部合法 URL 302 到内网地址
+        redirect: 'manual',
         headers: { 'User-Agent': 'MiHoYoGachaExport/1.0.1' },
         timeout
       })
+      if (res.status >= 300 && res.status < 400) {
+        const location = res.headers && res.headers.get && res.headers.get('location')
+        if (!location) throw new Error('redirect without location')
+        // 递归前会再次走协议/host/DNS 校验；retry 归零避免跳转环路放大重试
+        return fetchRemoteJSON(new URL(location, url).toString(), { timeout: options.timeout, retry: 0 })
+      }
       if (!res.ok) throw new Error('HTTP ' + res.status)
       // 流式读取并在超限时中断：先读完再判断长度的话，
-      // 超大响应已经占满内存，8MB 上限形同虚设
+      // 超大响应已经占满内存。按字节计（Uint8Array 的 length 即字节数），
+      // text.length 对中文/emoji 会严重低估实际网络体积
       const reader = res.body && res.body.getReader ? res.body.getReader() : null
       let text = ''
       if (reader) {
         const decoder = new TextDecoder('utf-8')
+        let bytes = 0
         for (;;) {
           const { done, value } = await reader.read()
           if (done) break
-          text += decoder.decode(value, { stream: true })
-          if (text.length > MAX_REMOTE_BYTES) {
+          bytes += value.length
+          if (bytes > MAX_REMOTE_BYTES) {
             try { await reader.cancel() } catch (e) {}
             throw new Error('response too large')
           }
+          text += decoder.decode(value, { stream: true })
         }
         text += decoder.decode()
       } else {
         text = await res.text()
-        if (text.length > MAX_REMOTE_BYTES) throw new Error('response too large')
+        if (Buffer.byteLength(text) > MAX_REMOTE_BYTES) throw new Error('response too large')
       }
       return JSON.parse(text)
     } catch (e) {
@@ -323,7 +359,13 @@ const sameBannerSet = (a, b) => {
     x.channel,
     String(x.start || '').slice(0, 16),
     String(x.end || '').slice(0, 16),
-    (x.up || []).slice().sort().join('|')
+    (x.up || []).slice().sort().join('|'),
+    // 远程源常只修正 UP 分类（upByType）而 up 名单不变，
+    // 不把它纳入指纹就会判「与上游一致」而丢弃分类修正
+    x.upByType ? [
+      (x.upByType.character || []).slice().sort().join('|'),
+      (x.upByType.weapon || []).slice().sort().join('|')
+    ].join('/') : ''
   ].join('@')).sort().join('\n')
   return norm(a) === norm(b)
 }
@@ -568,5 +610,7 @@ module.exports = {
   parseLocal,
   formatLocal,
   normalizeSet,
-  bannerKey
+  bannerKey,
+  isBlockedHost,
+  fetchRemoteJSON
 }

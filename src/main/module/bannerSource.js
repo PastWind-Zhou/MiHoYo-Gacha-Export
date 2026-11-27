@@ -41,20 +41,25 @@ const fetchText = async (url, headers = {}) => {
   const reader = res.body && res.body.getReader ? res.body.getReader() : null
   if (!reader) {
     const text = await res.text()
-    if (text.length > MAX_REMOTE_BYTES) throw new Error('response too large')
+    // 按字节计：中文/emoji 的 text.length 远小于实际网络字节数，
+    // 用字符数判断会让 8MB 上限失效（实际可达约 24MB）
+    if (Buffer.byteLength(text) > MAX_REMOTE_BYTES) throw new Error('response too large')
     return text
   }
   const decoder = new TextDecoder('utf-8')
   let text = ''
+  let bytes = 0
   try {
     for (;;) {
       const { done, value } = await reader.read()
       if (done) break
-      text += decoder.decode(value, { stream: true })
-      if (text.length > MAX_REMOTE_BYTES) {
+      // Uint8Array.length 就是本次读取的字节数，无需对整段字符串反复 byteLength
+      bytes += value.length
+      if (bytes > MAX_REMOTE_BYTES) {
         try { await reader.cancel() } catch (e) {}
         throw new Error('response too large')
       }
+      text += decoder.decode(value, { stream: true })
     }
     text += decoder.decode()
   } finally {
@@ -139,4 +144,4 @@ const fetchBanners = async (game) => {
   throw err
 }
 
-module.exports = { fetchBanners, fetchFromUpstream, fetchFromWiki, fetchFromMihoyo, UPSTREAM_SOURCES, sourceLabel }
+module.exports = { fetchBanners, fetchFromUpstream, fetchFromWiki, fetchFromMihoyo, UPSTREAM_SOURCES, sourceLabel, fetchText }

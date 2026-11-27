@@ -10,6 +10,11 @@ const config = {
   proxyPort: 8325,
   proxyMode: false,
   autoUpdate: true,
+  // 自动更新状态键：首次启动即可从磁盘读到默认值，
+  // 避免 update 模块读到 undefined 后按错误分支处理（team-lead 协调项）
+  skipVersion: '',
+  lastUpdateCheck: 0,
+  updateState: 'init',
   fetchFullHistory: false,
   hideNovice: false,
   hideStandard: false,
@@ -42,7 +47,8 @@ const getLocalConfig = async () => {
       }
     })
   }
-  if (configTemp.game && !isValidGame(configTemp.game)) {
+  // null / 空串也要回退：只判断真值时，games[null] 会让整个抓取链路崩溃
+  if (!isValidGame(configTemp.game)) {
     configTemp.game = 'hkrpg'
   }
   // currents 要逐游戏合并，不能整体替换：
@@ -67,23 +73,38 @@ const setConfig = (key, value) => {
 
 const saveConfig = async () => {
   let configTemp = config
-  if (urlsMap) {
-    const urls = [...urlsMap]
-    urls.forEach(item => {
-      try {
-        item[1] = cipherAes(item[1])
-      } catch (e) {
-        item[1] = ''
-      }
-    })
-    configTemp = Object.assign({}, config, { urls })
+  // urls 始终基于 urlsMap 加密后落盘：
+  // getLocalConfig 加载时已把 config.urls 解密回写，
+  // 若此时 urlsMap 尚未初始化（渲染层没读过 urls）就走「原样保存」分支，
+  // authkey 会以明文写进 config.json
+  if (!urlsMap) {
+    urlsMap = new Map(config.urls || [])
   }
+  // 逐对复制后再加密：直接改 urlsMap 里的数组会把明文覆盖成密文，
+  // 第二次 save 变成双重加密，加载解密失败后 URL 就丢了
+  const urls = [...urlsMap].map((item) => {
+    try {
+      return [item[0], cipherAes(item[1])]
+    } catch (e) {
+      return [item[0], '']
+    }
+  })
+  configTemp = Object.assign({}, config, { urls })
   await saveJSON('config.json', configTemp)
 }
 
 const getPlainConfig = () => config
 
 const configProxy = new Proxy(config, {
+  set: function (obj, prop, value) {
+    // SAVE_CONFIG 写入 urls 时同步刷新 urlsMap，否则 getter 仍返回旧 Map，
+    // 内存里的明文 URL 与 Save 落盘的密文不一致
+    if (prop === 'urls' && Array.isArray(value)) {
+      urlsMap = new Map(value)
+    }
+    obj[prop] = value
+    return true
+  },
   get: function (obj, prop) {
     if (prop === 'ready') {
       // 配置加载完成的信号：调用方 await 后才能信任 config.game / config.current

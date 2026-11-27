@@ -33,6 +33,15 @@ const yauzl = require('yauzl')
 const openZip = promisify(yauzl.open)
 const pipeline = promisify(stream.pipeline)
 
+// 解压目标必须始终位于 opts.dir 内。path.relative 既能挡住 ../ 穿越，
+// 也能挡住绝对路径与跨盘符（Windows 下跨盘 relative 结果带盘符，isAbsolute 为真）
+const assertInside = (root, target) => {
+  const relative = path.relative(root, target)
+  if (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
+    throw new Error(`Out of bound path "${target}" (root: "${root}")`)
+  }
+}
+
 class Extractor {
   constructor (zipPath, opts) {
     this.zipPath = zipPath
@@ -75,11 +84,8 @@ class Extractor {
           await fs.mkdir(destDir, { recursive: true })
 
           const canonicalDestDir = await fs.realpath(destDir)
-          const relativeDestDir = path.relative(this.opts.dir, canonicalDestDir)
-
-          if (relativeDestDir.split(path.sep).includes('..')) {
-            throw new Error(`Out of bound path "${canonicalDestDir}" found while processing file ${entry.fileName}`)
-          }
+          // 父目录校验：symlink 条目可能先把父目录替换成指向外部的链接
+          assertInside(this.opts.dir, canonicalDestDir)
 
           await this.extractEntry(entry)
           this.zipfile.readEntry()
@@ -136,10 +142,26 @@ class Extractor {
     await fs.mkdir(destDir, mkdirOptions)
     if (isDir) return
 
+    // 叶子节点校验：dest 自身若是指向外部的符号链接，
+    // createWriteStream(dest) 会顺着它写到 opts.dir 之外。
+    // 父目录校验（extract 里对 destDir 的 realpath）拦不住这种变体
+    try {
+      const destStat = await fs.lstat(dest)
+      if (destStat.isSymbolicLink()) {
+        assertInside(this.opts.dir, await fs.realpath(dest))
+      }
+    } catch (err) {
+      // 目标尚不存在是正常情况；其它错误（如越界抛出的 Error）继续上抛
+      if (err.code !== 'ENOENT') throw err
+    }
+
     const readStream = await promisify(this.zipfile.openReadStream.bind(this.zipfile))(entry)
 
     if (symlink) {
       const link = await getStream(readStream)
+      // symlink 目标也必须落在根目录内：否则后续同名普通文件条目会
+      // 顺着这个链接写到外部目录，光校验父目录拦不住
+      assertInside(this.opts.dir, path.resolve(path.dirname(dest), link))
       await fs.symlink(link, dest)
     } else {
       await pipeline(readStream, createWriteStream(dest, { mode: procMode }))
@@ -183,3 +205,5 @@ module.exports = async function (zipPath, opts) {
   opts.dir = await fs.realpath(opts.dir)
   return new Extractor(zipPath, opts).extract()
 }
+
+module.exports.assertInside = assertInside

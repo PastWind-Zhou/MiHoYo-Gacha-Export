@@ -59,11 +59,23 @@ if (migrated && migrated.from) {
   }
 }
 const sendMsg = (text, type = 'LOAD_DATA_STATUS') => {
+  // 推给渲染层与写进日志的文本统一脱敏：
+  // 抓取失败的 Error message 常带完整请求 URL（含 authkey），
+  // 原样转发等于把凭据明文暴露给日志与界面
+  if (typeof text === 'string') {
+    text = authkeyMask(text)
+  } else if (text instanceof Error) {
+    const masked = authkeyMask(String(text.message || text))
+    text = new Error(masked)
+  }
   if (win) {
     win.webContents.send(type, text)
   }
   if (type !== 'LOAD_DATA_STATUS') {
-    log.push([Date.now(), type, text])
+    log.push([Date.now(), type, sanitizeLogText(text)])
+    // 限制日志总量：渲染层可反复调用 LOG_ERROR，不限量会把内存与
+    // log.txt 撑到任意大小
+    if (log.length > MAX_LOG_ENTRIES) log.splice(0, log.length - MAX_LOG_ENTRIES)
     saveLog()
   }
 }
@@ -81,13 +93,40 @@ const saveLog = () => {
 }
 
 const authkeyMask = (text = '') => {
-  return text.replace(/authkey=[^&]+&/g, 'authkey=***&')
+  // 旧正则要求 authkey 后面必须跟 &：authkey 作为最后一个参数时
+  // 完全匹配不到，凭据明文照样落盘，因此改成匹配到参数边界为止
+  return text.replace(/authkey=[^&\s]+/g, 'authkey=***')
+}
+
+// 单条日志的长度上限：渲染层可通过 LOG_ERROR 写入任意内容，
+// 不限长时一条超长文本就能把 log.txt 撑爆
+const LOG_TEXT_LIMIT = 2000
+const MAX_LOG_ENTRIES = 1000
+// 进入日志的内容统一脱敏 + 限长（sendMsg 的 Error / 对象在此规范化）
+const sanitizeLogText = (text) => {
+  let str
+  if (text instanceof Error) {
+    str = text.stack || text.message || String(text)
+  } else if (typeof text === 'string') {
+    str = text
+  } else {
+    try {
+      str = JSON.stringify(text)
+    } catch (e) {
+      str = String(text)
+    }
+  }
+  str = authkeyMask(str)
+  if (str.length > LOG_TEXT_LIMIT) {
+    str = str.slice(0, LOG_TEXT_LIMIT) + '…(已截断)'
+  }
+  return str
 }
 
 unhandled({
   showDialog: false,
   logger: function (err) {
-    log.push([Date.now(), 'ERROR', authkeyMask(err.stack)])
+    log.push([Date.now(), 'ERROR', sanitizeLogText(err)])
     saveLog()
   }
 })
@@ -249,5 +288,6 @@ async function getCacheText(gamePath) {
 module.exports = {
   sleep, request, hash, cipherAes, decipherAes, saveLog, getCacheText,
   sendMsg, readJSON, saveJSON, initWindow, getWin, localIp, userPath, detectLocale, langMap,
+  authkeyMask, sanitizeLogText,
   appRoot, userDataPath
 }
