@@ -24,24 +24,52 @@ if (process.env.BUILD_TARGET === 'web') web()
 else unionBuild()
 
 function clean() {
-    // 注意：build/* 会递归删除 build 下的所有内容，
-    // 其中包含 <productName>-<version>/userData —— 那是用户的抽卡记录。
-    // 必须显式排除，否则每次 build 都会把用户数据删掉。
+    // 注意：build/ 下可能有 <productName>-<version>/userData —— 那是用户的抽卡记录，
+    // 清理时绝不能删。实测 del v6 的否定模式（!build/*/userData）只能把子目录
+    // 从匹配结果中排除，挡不住父目录（build/* 命中的版本目录）被整体递归删除。
+    // 因此对 build/ 改用显式遍历：保留 icons/lib 与任何目录下的 userData，
+    // 其余构建产物逐项删除。
     sync([
         'dist/electron/main/*',
         'dist/electron/renderer/*',
         'dist/web/*',
-        'build/*',
-        '!build/icons',
-        '!build/lib',
-        '!build/lib/electron-build.*',
-        '!build/icons/icon.*',
-        // 保留各版本目录下的用户数据
-        '!build/*/userData',
-        '!build/*/userData/**'
     ])
+    cleanBuildDir()
     console.log(`\n${doneLog}clear done`)
     if (process.env.BUILD_TARGET === 'onlyClean') process.exit()
+}
+
+// 显式清理 build/：保留 icons、lib，其余条目逐个处理（见 cleanEntry）
+function cleanBuildDir() {
+    const buildDir = path.resolve('build')
+    if (!fs.existsSync(buildDir)) return
+    for (const name of fs.readdirSync(buildDir)) {
+        if (name === 'icons' || name === 'lib') continue
+        cleanEntry(path.join(buildDir, name))
+    }
+}
+
+// 删除一个文件或目录；目录内含 userData 时只删 userData 之外的兄弟项，
+// 版本目录本身与 userData 原地保留（用户数据始终在 exe 同级目录下）
+function cleanEntry(target) {
+    let st
+    try {
+        st = fs.lstatSync(target)
+    } catch (e) {
+        return
+    }
+    if (!st.isDirectory()) {
+        fs.removeSync(target)
+        return
+    }
+    if (!fs.existsSync(path.join(target, 'userData'))) {
+        fs.removeSync(target)
+        return
+    }
+    for (const name of fs.readdirSync(target)) {
+        if (name === 'userData') continue
+        fs.removeSync(path.join(target, name))
+    }
 }
 
 function unionBuild() {
@@ -65,8 +93,14 @@ function unionBuild() {
     rollup.rollup(opt)
         .then(build => {
             results += `${doneLog}MainProcess build success` + '\n\n'
+            // write 失败也要捕获，否则 spinner 会一直挂着等不到 success/error
             build.write(opt.output).then(() => {
                 m.success('main')
+            }).catch(error => {
+                m.error('main')
+                console.log(`\n  ${errorLog}failed to write main process bundle`)
+                console.error(`\n${error}\n`)
+                process.exit(1)
             })
         })
         .catch(error => {

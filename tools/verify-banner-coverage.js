@@ -22,10 +22,11 @@ const { games } = require(path.join(ROOT, 'src/main/games'))
 const args = process.argv.slice(2)
 const useInfer = args.includes('--infer')
 const useGap = args.includes('--gap')
-// 默认目录按当前版本号推导，避免硬编码开发者的本机绝对路径与过期版本号
+// 默认目录按当前版本号推导（tools/package.js 的免安装产物目录名带 -win 后缀），
+// 避免硬编码开发者的本机绝对路径与过期版本号
 const pkg = require(path.join(ROOT, 'package.json'))
 const DEFAULT_USER_DATA = path.join(
-  ROOT, 'release', `${pkg.build.productName}-${pkg.version}`, 'userData'
+  ROOT, 'release', `${pkg.build.productName}-${pkg.version}-win`, 'userData'
 )
 const userDataDir = args.find((a) => !a.startsWith('--')) || DEFAULT_USER_DATA
 
@@ -251,7 +252,9 @@ const run = () => {
       }
     }
 
-    const r = report(game, banners, poolList, useInfer ? 'infer' : 'base')
+    // report 的第 4 参是 options 对象；此前误传 'infer'/'base' 字符串
+    //（字符串解构出的 count 恒为 undefined，等价于默认值，但属于笔误）
+    const r = report(game, banners, poolList)
     problems += r.problems
     suspicious += r.suspicious
     console.log('')

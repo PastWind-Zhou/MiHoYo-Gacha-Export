@@ -1,8 +1,11 @@
-// 在线更新包生成脚本
+// 在线更新包生成脚本（已废弃）
 //
-// 说明：本项目的正式发布走 release/ 目录（见 tools/package.js），
-// 应用内的自动更新功能已停用（src/main/update/index.js 仅保留开关）。
-// 这个脚本用于生成更新服务器所需的 app.zip + manifest.json。
+// 说明：本项目的正式发布走 release/ 目录（见 tools/package.js）。
+// 1.0.2 起应用内自动更新由自研模块负责（src/main/update/，
+// 直接从 GitHub Releases 下载 win.zip 并校验/备份/切换，无需更新服务器），
+// 不再需要本脚本生成的「app.zip + manifest.json」更新服务器格式。
+// 保留此脚本仅作历史参考；其中的解压路径已按当前产物名修正，
+// 如需临时生成旧格式更新包，仍然可用。
 //
 // 产物约定（与 update/index.js 的读取逻辑一致）：
 //   build/update/CNAME                       更新域名
@@ -70,7 +73,8 @@ const start = async () => {
   const zip = new AdmZip(appPackage)
   zip.extractAllTo(unpackDir, true)
 
-  const appDir = path.join(unpackDir, `${pkg.build.productName}-${version}`, 'resources', 'app')
+  // 解压后的顶层目录名与 tools/package.js 的产物名一致：MiHoYoGachaExport-<version>-win
+  const appDir = path.join(unpackDir, `${pkg.build.productName}-${version}-win`, 'resources', 'app')
   if (!fs.existsSync(appDir)) {
     console.error('程序包结构不符合预期，找不到: ' + appDir)
     process.exit(1)
